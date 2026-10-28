@@ -481,18 +481,21 @@ class Instalacion:
         script = (
             "@echo off\r\n"
             'if not "%~1"=="x" (copy /y "%~f0" "%TEMP%\\descargaralbunes_desinstalar.cmd" >nul & start "" "%TEMP%\\descargaralbunes_desinstalar.cmd" x & exit /b)\r\n'
-            f"title Desinstalar {NOMBRE_APP}\r\n"
-            f'echo Se va a borrar {NOMBRE_APP}: {r}\r\n'
+            "title Desinstalar Descargar Albumes\r\n"
+            f'echo Se va a borrar Descargar Albumes: {r}\r\n'
             "echo (la musica de la carpeta Desc_Albunes tambien se borra)\r\n"
-            f'choice /m "Desinstalar {NOMBRE_APP}"\r\n'
+            'choice /m "Desinstalar Descargar Albumes"\r\n'
             "if errorlevel 2 exit /b 0\r\n"
             f"powershell -NoProfile -Command \"Get-Process | Where-Object {{ $_.Path -like '{r}\\*' }} | Stop-Process -Force\" >nul 2>nul\r\n"
             "ping -n 3 127.0.0.1 >nul\r\n"
             f'rmdir /s /q "{r}"\r\n'
-            f'del "%USERPROFILE%\\Desktop\\{NOMBRE_APP}.lnk" 2>nul\r\n'
-            f'del "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\{NOMBRE_APP}.lnk" 2>nul\r\n'
+            # Los accesos directos se buscan con PowerShell en las MISMAS carpetas donde se crearon (el Escritorio
+            # puede estar en OneDrive) y con un comodin ASCII, para no depender de la tilde del nombre en cmd.
+            "powershell -NoProfile -Command \"foreach ($d in @([Environment]::GetFolderPath('Desktop'), "
+            "[Environment]::GetFolderPath('Programs'), [Environment]::GetFolderPath('CommonDesktopDirectory'))) "
+            "{ Remove-Item -ErrorAction SilentlyContinue -Path (Join-Path $d 'Descargar *bumes.lnk') }\" >nul 2>nul\r\n"
             f'reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{CARPETA_APP}" /f >nul 2>nul\r\n'
-            f"echo Listo, {NOMBRE_APP} fue desinstalado.\r\n"
+            "echo Listo, Descargar Albumes fue desinstalado.\r\n"
             "pause\r\n"
         )
         try:
