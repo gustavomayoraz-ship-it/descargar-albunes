@@ -111,8 +111,10 @@ class VentanaPrincipal:
         self.ventana = tk.Tk()
         self.ventana.title("🎵 Descargar Álbumes")
         self.ventana.configure(bg=T["fondo"])
-        self.ventana.geometry("1120x900")
-        self.ventana.minsize(900, 700)
+        ancho = min(1120, max(900, self.ventana.winfo_screenwidth() - 60))
+        alto = min(900, max(640, self.ventana.winfo_screenheight() - 110))
+        self.ventana.geometry(f"{ancho}x{alto}+{max(0, (self.ventana.winfo_screenwidth() - ancho) // 2)}+10")
+        self.ventana.minsize(860, 600)
 
         self._construir_ui()
         self.ventana.protocol("WM_DELETE_WINDOW", self._on_cerrar)
@@ -292,10 +294,15 @@ class VentanaPrincipal:
             bg=T["fondo"], fg=T["tenue"], font=(FUENTE, 8),
         ).pack(side="left")
 
+        # La parte de abajo se empaqueta PRIMERO (side="bottom") para que, si la pantalla es
+        # chica, se achique el panel de álbumes y nunca queden ocultos los botones ni la lista.
+        inferior = tk.Frame(contenedor, bg=T["fondo"])
+        inferior.pack(side="bottom", fill="x")
+
         # ---- panel dividido: álbumes | temas ----
         paned = tk.PanedWindow(contenedor, orient="horizontal", sashwidth=10, bg=T["fondo"],
                                bd=0, sashrelief="flat")
-        paned.pack(fill="both", expand=True, pady=(0, 10))
+        paned.pack(side="top", fill="both", expand=True, pady=(0, 10))
 
         marco_lista, cuerpo_albumes, _ = self._tarjeta(paned, "Álbumes encontrados", "💿")
         self.canvas = tk.Canvas(cuerpo_albumes, bg=T["card"], highlightthickness=0, yscrollincrement=24)
@@ -345,7 +352,7 @@ class VentanaPrincipal:
         paned.add(marco_tracklist, minsize=300, width=420)
 
         # ---- opciones ----
-        fila_opciones = tk.Frame(contenedor, bg=T["fondo"])
+        fila_opciones = tk.Frame(inferior, bg=T["fondo"])
         fila_opciones.pack(fill="x", pady=(0, 8))
         tk.Label(fila_opciones, text="Artista (carpeta y tags)", bg=T["fondo"],
                  font=(FUENTE, 9, "bold"), fg=T["suave"]).pack(side="left")
@@ -366,7 +373,7 @@ class VentanaPrincipal:
             ).pack(side="left", padx=(0, 14))
 
         # ---- botones de acción ----
-        fila_descarga = tk.Frame(contenedor, bg=T["fondo"])
+        fila_descarga = tk.Frame(inferior, bg=T["fondo"])
         fila_descarga.pack(fill="x")
         self.btn_descargar = self._boton(fila_descarga, "⬇  Descargar seleccionados", self._on_descargar,
                                          T["off"], T["ok_hover"], state="disabled")
@@ -381,21 +388,21 @@ class VentanaPrincipal:
         self.btn_abrir_carpeta.config(pady=10)
         self.btn_abrir_carpeta.pack(side="right")
 
-        self.progressbar = ttk.Progressbar(contenedor, mode="determinate", length=380,
+        self.progressbar = ttk.Progressbar(inferior, mode="determinate", length=380,
                                            style="Neon.Horizontal.TProgressbar")
         self.progressbar.pack(fill="x", pady=(12, 4))
 
         self.lbl_estado = tk.Label(
-            contenedor, text="Listo para descargar.", font=(FUENTE, 9), bg=T["fondo"],
+            inferior, text="Listo para descargar.", font=(FUENTE, 9), bg=T["fondo"],
             fg=T["suave"], anchor="w",
         )
         self.lbl_estado.pack(fill="x")
 
         # ---- lista de temas en proceso ----
-        marco_cola_ext, cuerpo_cola, _ = self._tarjeta(contenedor, "Temas en proceso · descarga, análisis y arreglos", "📋")
-        marco_cola_ext.pack(fill="both", expand=True, pady=(8, 0))
+        marco_cola_ext, cuerpo_cola, _ = self._tarjeta(inferior, "Temas en proceso · descarga, análisis y arreglos", "📋")
+        marco_cola_ext.pack(fill="x", pady=(8, 0))
         self.lista_cola = tk.Listbox(
-            cuerpo_cola, height=9, font=(FUENTE, 10), activestyle="none",
+            cuerpo_cola, height=6, font=(FUENTE, 10), activestyle="none",
             bg=T["card"], fg=T["texto"], selectbackground=T["card_sel"], selectforeground="white",
             relief="flat", bd=0, highlightthickness=0,
         )
@@ -405,9 +412,9 @@ class VentanaPrincipal:
         scroll_cola.pack(side="right", fill="y")
         self.lista_cola.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=4)
 
-        marco_log = tk.Frame(contenedor, bg=T["fondo"])
+        marco_log = tk.Frame(inferior, bg=T["fondo"])
         marco_log.pack(fill="x", pady=(8, 0))
-        self.texto_log = tk.Text(marco_log, height=4, font=("Consolas", 9), bg="#080a1a", fg="#9fb0e8",
+        self.texto_log = tk.Text(marco_log, height=3, font=("Consolas", 9), bg="#080a1a", fg="#9fb0e8",
                                  relief="flat", bd=0, padx=8, pady=6, insertbackground="white")
         self.texto_log.pack(fill="x")
         self.texto_log.configure(state="disabled")
@@ -736,6 +743,11 @@ class VentanaPrincipal:
         self.var_artista_carpeta.set(datos["artista"])
         self.var_busqueda.set(datos["artista"])
         self.var_mejor_version.set(bool(datos.get("mejor_version")))
+        # Se muestran en la lista de la izquierda (tildados) los álbumes que se retoman.
+        self._gen_busqueda += 1
+        self._mostrar_resultados(albumes, None, self._gen_busqueda)
+        for item in self.albumes_encontrados:
+            item["var"].set(True)
         self._iniciar_descarga(albumes, datos["artista"], bool(datos.get("mejor_version")))
 
     def _iniciar_descarga(self, seleccionados, artista, mejor_version):
