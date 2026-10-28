@@ -17,6 +17,7 @@ Ventana principal de Descargar_Albunes:
 import logging
 import os
 import random
+import re
 import subprocess
 import sys
 import threading
@@ -37,6 +38,22 @@ MAX_INTENTOS = 3
 MAX_LINEAS_LOG = 3000
 
 
+# Etapas visibles en la lista de temas: nombre -> (icono, color de fondo)
+ETAPAS = {
+    "En cola": ("⌛", "#475569"),
+    "Buscando versión": ("🔎", "#0369a1"),
+    "Descargando": ("⬇️", "#0e7490"),
+    "Validando": ("🛡️", "#b45309"),
+    "Analizando BPM": ("🎵", "#6d28d9"),
+    "Etiquetas": ("🏷️", "#a21caf"),
+    "Renombrando": ("✏️", "#be185d"),
+    "Reintentando": ("🔁", "#c2410c"),
+}
+COLOR_OK = "#0b7a4b"
+COLOR_ERROR = "#b91c1c"
+COLOR_OMITIDO = "#334155"
+
+
 class _Abortar(Exception):
     """Demasiados bloqueos seguidos: se frena toda la descarga."""
 
@@ -55,11 +72,12 @@ class VentanaPrincipal:
         self._ultimo_sleep_informado = None
         self._gen_busqueda = 0         # descarta respuestas de búsquedas viejas
         self._gen_tracklist = 0        # descarta tracklists de clicks viejos
+        self._cola_estado = {}         # fila de la lista -> estado visible del tema en proceso
 
         self.ventana = tk.Tk()
         self.ventana.title("🎵 Descargar Álbumes")
         self.ventana.configure(bg="#f8f9fa")
-        self.ventana.geometry("980x700")
+        self.ventana.geometry("980x860")
         self.ventana.minsize(760, 520)
 
         self._construir_ui()
@@ -234,9 +252,25 @@ class VentanaPrincipal:
         )
         self.lbl_estado.pack(fill="x")
 
+        tk.Label(
+            contenedor, text="📋 Temas en proceso (descarga, análisis y arreglos aplicados)",
+            font=("Segoe UI", 9, "bold"), bg="#f8f9fa", fg="#2c3e50", anchor="w",
+        ).pack(fill="x", pady=(8, 2))
+        marco_cola = tk.Frame(contenedor, bg="#f8f9fa")
+        marco_cola.pack(fill="both", expand=True)
+        self.lista_cola = tk.Listbox(
+            marco_cola, height=9, font=("Segoe UI", 10), activestyle="none",
+            bg="#1e293b", fg="#e2e8f0", selectbackground="#334155", selectforeground="white",
+            relief="flat", bd=0, highlightthickness=0,
+        )
+        scroll_cola = ttk.Scrollbar(marco_cola, orient="vertical", command=self.lista_cola.yview)
+        self.lista_cola.configure(yscrollcommand=scroll_cola.set)
+        self.lista_cola.pack(side="left", fill="both", expand=True)
+        scroll_cola.pack(side="right", fill="y")
+
         marco_log = tk.Frame(contenedor, bg="#f8f9fa")
-        marco_log.pack(fill="both", expand=False, pady=(6, 0))
-        self.texto_log = tk.Text(marco_log, height=8, font=("Consolas", 9), bg="#2c3e50", fg="#ecf0f1")
+        marco_log.pack(fill="x", expand=False, pady=(6, 0))
+        self.texto_log = tk.Text(marco_log, height=5, font=("Consolas", 9), bg="#2c3e50", fg="#ecf0f1")
         self.texto_log.pack(fill="both", expand=True)
         self.texto_log.configure(state="disabled")
 
@@ -535,6 +569,9 @@ class VentanaPrincipal:
             self._log_hilo("⚠️ No se encontraron temas para descargar.")
             return
 
+        self._programar(0, lambda: self._cola_cargar(trabajo))
+        self._esperar_cola_cargada(trabajo)
+
         # 2) Procesar cada tema.
         descargados = 0
         omitidos = 0
@@ -553,10 +590,12 @@ class VentanaPrincipal:
             carpeta = ruta_carpeta_album(artista, album)
             if tema_ya_descargado(carpeta, numero):
                 omitidos += 1
+                self._cola_fin(tarea, "omitido", "ya estaba descargado")
                 self._log_hilo(f"⏭ Ya existe, se omite: {titulo_tema} ({album} #{numero})")
             elif not tarea.get("url") or not tarea.get("disponible", True):
                 # Borrado/privado en la playlist: no hay nombre ni video que buscar.
                 no_disponibles.append(f"{album} #{numero}")
+                self._cola_fin(tarea, "no_disponible", "video borrado o privado en YouTube")
                 self._log_hilo(f"🚫 {album} #{numero}: el video fue borrado o es privado en "
                                f"YouTube, no se puede descargar.")
             else:
@@ -569,12 +608,14 @@ class VentanaPrincipal:
                     break
                 if ruta_final:
                     descargados += 1
+                    self._cola_fin(tarea, "ok", self._resumen_ok(tarea, ruta_final))
                     self._log_hilo(f"✅ Guardado: {os.path.basename(ruta_final)}")
                 elif self._cancelar_descarga.is_set():
                     detenida = True
                     break
                 else:
                     fallidos.append(f"{album} #{numero} - {titulo_tema}")
+                    self._cola_fin(tarea, "error", "no se pudo descargar: " + tarea.get("_ultimo_error", "sin detalle"))
                     self._log_hilo(f"❌ No se pudo descargar: {titulo_tema}")
 
             hechos = idx + 1
@@ -606,12 +647,14 @@ class VentanaPrincipal:
         fuente se reintenta hasta MAX_INTENTOS veces. Devuelve la ruta o None.
         """
         fuentes = ["busqueda", "pl"] if mejor_version else ["pl", "busqueda"]
+        arreglos = tarea.setdefault("_arreglos", [])
 
         for fuente in fuentes:
             if self._cancelar_descarga.is_set():
                 return None
             if fuente == "busqueda":
                 self._log_hilo("   🔎 Buscando la mejor versión en YouTube...")
+                self._cola_etapa(tarea, "Buscando versión")
                 try:
                     r = buscar_mejor_resultado(artista, tarea["titulo_tema"],
                                                duracion_esperada=tarea.get("duracion"))
@@ -623,6 +666,10 @@ class VentanaPrincipal:
                     continue
                 url = r["url"]
                 self._log_hilo(f"   ↳ Encontrado: {r.get('titulo')}")
+                if fuente != fuentes[0]:
+                    arreglos.append("video de la playlist falló: se usó otra versión de YouTube")
+                elif mejor_version:
+                    arreglos.append("mejor versión elegida por búsqueda")
             else:
                 url = tarea["url"]
 
@@ -630,14 +677,27 @@ class VentanaPrincipal:
                 if self._cancelar_descarga.is_set():
                     return None
                 try:
-                    return procesar_tema(
+                    if intento > 1:
+                        self._cola_etapa(tarea, "Reintentando", f"intento {intento}/{MAX_INTENTOS}")
+                    else:
+                        self._cola_etapa(tarea, "Descargando")
+                    propios = []
+                    ruta = procesar_tema(
                         url, artista, tarea["titulo_tema"], tarea["numero"], tarea["album"],
                         ffmpeg_path=self.ffmpeg_path_dir, duracion_esperada=tarea.get("duracion"),
+                        on_etapa=lambda n: self._cola_etapa(tarea, n), arreglos=propios,
                     )
+                    if intento > 1:
+                        arreglos.append(f"reintentado ({intento} intentos)")
+                    arreglos.extend(propios)
+                    return ruta
                 except Exception as exc:
                     msg = str(exc)
+                    tarea["_ultimo_error"] = msg.replace("\n", " ")[:90]
                     log.warning("Intento %s/%s falló (%s): %s", intento, MAX_INTENTOS, url, msg[:300])
                     self._log_hilo(f"   ⚠️ Intento {intento}/{MAX_INTENTOS} falló: {msg[:160]}")
+                    if "Archivo inválido" in msg:
+                        arreglos.append("archivo descartado por no pasar la validación")
                     if anti_bloqueo.es_error_de_bloqueo(msg):
                         if anti_bloqueo.debe_abortar():
                             raise _Abortar()
@@ -651,6 +711,101 @@ class VentanaPrincipal:
                         if self._esperar(5 * intento):
                             return None
         return None
+
+    # ---- lista de temas en proceso (estilo YouTube MP3) -----------------
+    def _cola_cargar(self, trabajo):
+        """Llena la lista con todos los temas: cada fila empieza 'En cola'."""
+        self._cola_estado = {}
+        try:
+            self.lista_cola.delete(0, "end")
+        except tk.TclError:
+            return
+        for i, t in enumerate(trabajo):
+            t["_fila"] = i
+            t["_base"] = f"{t['album']} · {int(t['numero']):02d}. {t['titulo_tema']}"
+            self.lista_cola.insert("end", "")
+            self._cola_pintar(i, "En cola", t["_base"])
+
+    def _cola_pintar(self, fila, etapa, base, pulso=0, extra=""):
+        icono, color = ETAPAS.get(etapa, ("⚙️", "#475569"))
+        if etapa == "En cola":
+            texto = f"{icono} En cola   ·   {base}"
+        else:
+            celdas = 8
+            llenas = min(celdas - 1, pulso % celdas)
+            barra = "▰" * llenas + "▱" * (celdas - llenas)
+            texto = f"{icono} {barra} {etapa}   ·   {base}"
+        if extra:
+            texto += f"   ·   {extra}"
+        self._cola_escribir(fila, texto, color)
+
+    def _cola_escribir(self, fila, texto, color):
+        try:
+            self.lista_cola.delete(fila)
+            self.lista_cola.insert(fila, texto)
+            self.lista_cola.itemconfig(fila, bg=color, fg="white")
+        except tk.TclError:
+            pass
+
+    def _cola_etapa(self, tarea, etapa, extra=""):
+        """Desde cualquier hilo: marca la etapa actual del tema (con barrita animada)."""
+        fila = tarea.get("_fila")
+        if fila is None:
+            return
+        def _ui():
+            st = self._cola_estado.get(fila)
+            if st is None:
+                st = {"tarea": tarea, "pulso": 0}
+                self._cola_estado[fila] = st
+                self._programar(350, lambda: self._cola_animar(fila))
+            st["etapa"], st["extra"], st["pulso"] = etapa, extra, 0
+            self._cola_pintar(fila, etapa, tarea["_base"], 0, extra)
+            try:
+                self.lista_cola.see(fila)
+            except tk.TclError:
+                pass
+        self._programar(0, _ui)
+
+    def _cola_animar(self, fila):
+        st = self._cola_estado.get(fila)
+        if not st:
+            return
+        st["pulso"] += 1
+        self._cola_pintar(fila, st["etapa"], st["tarea"]["_base"], st["pulso"], st.get("extra", ""))
+        self._programar(350, lambda: self._cola_animar(fila))
+
+    def _cola_fin(self, tarea, estado, resumen=""):
+        """estado: 'ok' | 'error' | 'omitido' | 'no_disponible'."""
+        fila = tarea.get("_fila")
+        if fila is None:
+            return
+        def _ui():
+            self._cola_estado.pop(fila, None)
+            iconos = {"ok": ("✅", COLOR_OK), "error": ("❌", COLOR_ERROR),
+                      "omitido": ("⏭", COLOR_OMITIDO), "no_disponible": ("🚫", COLOR_ERROR)}
+            icono, color = iconos.get(estado, ("•", COLOR_OMITIDO))
+            texto = f"{icono} {tarea['_base']}" + (f"   ·   {resumen}" if resumen else "")
+            self._cola_escribir(fila, texto, color)
+        self._programar(0, _ui)
+
+    def _esperar_cola_cargada(self, trabajo):
+        """El hilo espera (poco) a que la interfaz haya dibujado la lista."""
+        for _ in range(100):
+            if all("_fila" in t for t in trabajo):
+                return
+            self._esperar(0.05)
+
+    def _resumen_ok(self, tarea, ruta_final):
+        m = re.match(r"\[(\d+|SD) BPM\]", os.path.basename(ruta_final))
+        bpm = f"{m.group(1)} BPM · " if m else ""
+        return bpm + self._resumen_arreglos(tarea)
+
+    @staticmethod
+    def _resumen_arreglos(tarea, solo_arreglos=False):
+        arreglos = tarea.get("_arreglos") or []
+        if not arreglos:
+            return "" if solo_arreglos else "sin arreglos necesarios"
+        return "arreglos: " + "; ".join(arreglos)
 
     def _actualizar_progreso(self, porcentaje, completados, total):
         self._config_seguro(self.progressbar, value=porcentaje)
