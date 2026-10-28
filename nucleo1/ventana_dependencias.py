@@ -452,6 +452,13 @@ class VentanaVerificacion:
         self._general(resumen)
         self._programar(0, self._habilitar_boton_iniciar)
 
+        # Si está TODO en orden (librerías, FFmpeg, Deno y Firefox), no hace falta
+        # que el usuario toque nada: se inicia la aplicación de una. Si falta algo
+        # (aunque sea recomendado), la ventana queda abierta para verlo o instalarlo.
+        if pip_ok and ffmpeg_ok and deno_ok and firefox_ok:
+            log.info("Todo en orden: se inicia la aplicación automáticamente")
+            self._programar(0, self._on_iniciar_app)
+
     def _aplicar_estado_externo(self, ok, label, boton, texto_faltante):
         if ok:
             self._estado(label, "✅ Instalado", "#27ae60")
