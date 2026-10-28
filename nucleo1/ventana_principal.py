@@ -57,6 +57,7 @@ ETAPAS = {
     "Etiquetas": ("🏷️", "#a21caf"),
     "Renombrando": ("✏️", "#be185d"),
     "Reintentando": ("🔁", "#c2410c"),
+    "Pausa anti-bloqueo": ("🧊", "#1d4ed8"),
 }
 COLOR_OK = "#0b7a4b"
 COLOR_ERROR = "#b91c1c"
@@ -931,9 +932,9 @@ class VentanaPrincipal:
 
         # 3) Resumen final.
         if abortada:
-            self._log_hilo("🛑 Demasiados bloqueos seguidos de YouTube: descarga frenada. "
-                           "Esperá un rato (o probá más tarde) y tocá Descargar de nuevo: "
-                           "se retoma donde quedó.")
+            self._log_hilo("🛑 YouTube siguió bloqueando después de varias pausas largas: "
+                           "freno la tanda para no empeorarlo. Probá más tarde (o abrí el programa "
+                           "otra vez y elegí continuar): se retoma donde quedó.")
         elif detenida:
             self._log_hilo("⏹ Descarga detenida por el usuario.")
         else:
@@ -1009,9 +1010,15 @@ class VentanaPrincipal:
                     if anti_bloqueo.es_error_de_bloqueo(msg):
                         if anti_bloqueo.debe_abortar():
                             raise _Abortar()
-                        pausa = anti_bloqueo.segundos_de_pausa_por_bloqueos() or 20
-                        self._log_hilo(f"   ⏳ Bloqueo detectado: pausa de {pausa}s antes de seguir.")
-                        if self._esperar(pausa):
+                        pausa = anti_bloqueo.segundos_de_pausa_por_bloqueos()
+                        if pausa:
+                            anti_bloqueo.registrar_cooldown()
+                            arreglos.append("pausa anti-bloqueo y reintento automático")
+                            self._log_hilo(f"   🧊 YouTube está bloqueando: pausa de {pausa // 60} min {pausa % 60:02d} s "
+                                           f"y sigo solo (la tanda queda guardada).")
+                            if self._pausa_con_cuenta(tarea, pausa):
+                                return None
+                        elif self._esperar(20):
                             return None
                     elif anti_bloqueo.es_error_no_disponible(msg):
                         break  # reintentar no sirve: pasar a la otra fuente
@@ -1098,6 +1105,20 @@ class VentanaPrincipal:
             texto = f"{icono} {tarea['_base']}" + (f"   ·   {resumen}" if resumen else "")
             self._cola_escribir(fila, texto, color)
         self._programar(0, _ui)
+
+    def _pausa_con_cuenta(self, tarea, segundos):
+        """Pausa cancelable con cuenta regresiva visible. True si el usuario la cortó."""
+        fin = time.time() + segundos
+        while True:
+            resto = int(fin - time.time())
+            if resto <= 0:
+                return False
+            m, sg = divmod(resto, 60)
+            self._cola_etapa(tarea, "Pausa anti-bloqueo", f"reanudo en {m}:{sg:02d}")
+            self._programar(0, lambda r=resto: self._config_seguro(
+                self.lbl_estado, text=f"🧊 Pausa anti-bloqueo: reanudo en {r // 60}:{r % 60:02d}"))
+            if self._esperar(1.0):
+                return True
 
     def _esperar_cola_cargada(self, trabajo):
         """El hilo espera (poco) a que la interfaz haya dibujado la lista."""

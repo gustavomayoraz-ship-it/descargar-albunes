@@ -15,8 +15,14 @@ Detalles importantes:
   - Solo se cuenta como bloqueo lo que realmente lo es (no un video bloqueado
     por país ni un ID que casualmente contiene "429").
   - Los archivos de estado se escriben de forma atómica y con lock.
-  - No se fuerzan clientes ni User-Agent: yt-dlp elige lo que mejor funciona
-    en cada versión (y se mantiene actualizado al iniciar).
+  - Por defecto no se fuerzan clientes ni User-Agent: yt-dlp elige lo que mejor
+    funciona en cada versión (y se mantiene actualizado al iniciar). Solo si
+    un intento se bloquea se pasa a una "escalera" de métodos alternativos
+    (sin cookies, otro cliente de YouTube, modo permisivo) y el programa
+    aprende qué cliente le funciona mejor.
+  - Si YouTube igual bloquea, se hacen pausas largas con cuenta regresiva y se
+    reintenta solo; recién tras varias pausas seguidas sin éxito se frena la
+    tanda (queda guardada para retomarla).
 """
 
 import logging
@@ -39,7 +45,12 @@ EXITOS_PARA_DECAER = 5
 VENTANA_HISTORIAL = 30
 BLOQUEOS_PARA_PAUSA_LARGA = 3
 BLOQUEOS_PARA_ABORTAR = 5
-PAUSA_LARGA_BASE = 60   # segundos por bloqueo extra (tope 300)
+COOLDOWNS_PARA_ABORTAR = 3   # pausas largas seguidas sin lograr ni una descarga
+PAUSA_LARGA_BASE = 90   # segundos por bloqueo extra
+PAUSA_LARGA_MAX = 600
+# Clientes de YouTube a probar cuando el método estándar se bloquea. Si alguno
+# ya no existe en la versión de yt-dlp instalada, falla rápido y el ranking lo hunde.
+CLIENTES_YOUTUBE = ["tv", "web_safari", "mweb", "android_vr", "ios", "web_creator", "web"]
 
 _LOCK = threading.RLock()
 
@@ -69,6 +80,8 @@ ESTADO_POR_DEFECTO = {
     "bloqueos_consecutivos": 0,
     "exitos_consecutivos": 0,
     "historial": [],  # True = ok, False = bloqueo detectado
+    "cooldowns_seguidos": 0,
+    "clientes": {},   # cliente -> {"ok": n, "fail": n}
 }
 
 _cookies_desactivadas = False
@@ -154,6 +167,7 @@ def registrar_resultado(exito, mensaje_error=None):
         elif exito:
             historial.append(True)
             estado["bloqueos_consecutivos"] = 0
+            estado["cooldowns_seguidos"] = 0
             estado["exitos_consecutivos"] = estado.get("exitos_consecutivos", 0) + 1
             if estado["exitos_consecutivos"] % EXITOS_PARA_DECAER == 0:
                 actual = max(SLEEP_BASE, actual - DECREMENTO_TRAS_EXITOS)
@@ -177,6 +191,7 @@ def reiniciar_bloqueos_consecutivos():
     with _LOCK:
         estado = cargar_estado()
         estado["bloqueos_consecutivos"] = 0
+        estado["cooldowns_seguidos"] = 0
         guardar_estado(estado)
 
 
@@ -185,12 +200,85 @@ def segundos_de_pausa_por_bloqueos():
     n = bloqueos_consecutivos()
     if n < BLOQUEOS_PARA_PAUSA_LARGA:
         return 0
-    return min(300, PAUSA_LARGA_BASE * (n - BLOQUEOS_PARA_PAUSA_LARGA + 1))
+    return min(PAUSA_LARGA_MAX, PAUSA_LARGA_BASE * (n - BLOQUEOS_PARA_PAUSA_LARGA + 1))
+
+
+def registrar_cooldown():
+    """Anota que se hizo una pausa larga. Devuelve cuántas van seguidas sin éxito."""
+    with _LOCK:
+        estado = cargar_estado()
+        estado["cooldowns_seguidos"] = estado.get("cooldowns_seguidos", 0) + 1
+        guardar_estado(estado)
+        return estado["cooldowns_seguidos"]
 
 
 def debe_abortar():
-    """True si hay tantos bloqueos seguidos que conviene frenar la descarga."""
-    return bloqueos_consecutivos() >= BLOQUEOS_PARA_ABORTAR
+    """
+    True solo si, además de muchos bloqueos seguidos, ya se hicieron varias
+    pausas largas sin lograr ni una descarga: ahí insistir empeora el bloqueo.
+    """
+    estado = cargar_estado()
+    return (estado.get("bloqueos_consecutivos", 0) >= BLOQUEOS_PARA_ABORTAR
+            and estado.get("cooldowns_seguidos", 0) >= COOLDOWNS_PARA_ABORTAR)
+
+
+# ----------------------------------------------------------------------
+# Escalera de métodos y aprendizaje de clientes
+# ----------------------------------------------------------------------
+def ranking_clientes():
+    """Clientes ordenados por tasa de éxito aprendida (los desconocidos, al medio)."""
+    stats = cargar_estado().get("clientes", {})
+
+    def puntaje(c):
+        d = stats.get(c) or {}
+        ok, fail = d.get("ok", 0), d.get("fail", 0)
+        return (ok + 1) / (ok + fail + 2)
+
+    return sorted(CLIENTES_YOUTUBE, key=puntaje, reverse=True)
+
+
+def registrar_cliente(clientes, exito):
+    if not clientes:
+        return
+    with _LOCK:
+        estado = cargar_estado()
+        stats = estado.setdefault("clientes", {})
+        for c in clientes:
+            d = stats.setdefault(c, {"ok": 0, "fail": 0})
+            d["ok" if exito else "fail"] += 1
+            # Memoria corta: evita que un mal día de hace semanas pese para siempre.
+            if d["ok"] + d["fail"] > 40:
+                d["ok"], d["fail"] = d["ok"] // 2, d["fail"] // 2
+        guardar_estado(estado)
+
+
+def plan_de_intentos():
+    """
+    Métodos a probar EN ORDEN para un mismo video. El primero es el normal;
+    los siguientes solo se usan si el anterior se bloqueó.
+    Cada intento: {"nombre", "clientes" (lista o None), "cookies" (bool), "permisivo" (bool)}.
+    """
+    plan = []
+    if not _cookies_desactivadas and firefox_disponible():
+        plan.append({"nombre": "estándar con cookies", "clientes": None, "cookies": True, "permisivo": False})
+    plan.append({"nombre": "estándar sin cookies", "clientes": None, "cookies": False, "permisivo": False})
+    ranking = ranking_clientes()
+    for c in ranking[:2]:
+        plan.append({"nombre": f"cliente {c}", "clientes": [c], "cookies": False, "permisivo": False})
+    plan.append({"nombre": "modo permisivo", "clientes": ranking, "cookies": False, "permisivo": True})
+    return plan
+
+
+def opciones_para_intento(intento):
+    """Opciones de yt-dlp para un intento del plan."""
+    opts = opciones_antibloqueo()
+    if not intento.get("cookies"):
+        opts.pop("cookiesfrombrowser", None)
+    elif "cookiesfrombrowser" not in opts and firefox_disponible():
+        opts["cookiesfrombrowser"] = ("firefox",)
+    if intento.get("clientes"):
+        opts["extractor_args"] = {"youtube": {"player_client": list(intento["clientes"])}}
+    return opts
 
 
 # ----------------------------------------------------------------------

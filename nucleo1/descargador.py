@@ -10,10 +10,12 @@ y el archivo final solo se publica si pasó la validación (tamaño y duración)
 
 import logging
 import os
+import random
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 
 import anti_bloqueo
@@ -56,29 +58,66 @@ def _opciones_descarga(carpeta_temp, ffmpeg_path, registro):
     return opts
 
 
-def descargar_audio(url_video, carpeta_temp, ffmpeg_path=None):
-    """Descarga el audio de un video y lo deja como <id>.mp3 en carpeta_temp."""
+def descargar_audio(url_video, carpeta_temp, ffmpeg_path=None, notas=None):
+    """
+    Descarga el audio de un video y lo deja como <id>.mp3 en carpeta_temp.
+
+    Si YouTube bloquea el intento, prueba solo la "escalera" de métodos
+    (ver anti_bloqueo.plan_de_intentos): con/sin cookies, otros clientes de
+    YouTube y modo permisivo, con una pausa corta y al azar entre uno y otro.
+    Un video borrado/privado corta la escalera enseguida (insistir no sirve).
+    """
     os.makedirs(carpeta_temp, exist_ok=True)
-    registro = anti_bloqueo.RegistroErrores()
-    opts = _opciones_descarga(carpeta_temp, ffmpeg_path, registro)
-    try:
-        with anti_bloqueo.crear_ydl(opts) as ydl:
-            info = ydl.extract_info(url_video, download=True)
-    except Exception as exc:
-        msg = str(exc)
-        anti_bloqueo.registrar_resultado(exito=False, mensaje_error=f"{msg} | {registro.texto()}")
-        raise ErrorDescarga(msg) from exc
+    plan = anti_bloqueo.plan_de_intentos()
+    ultimo_error = ""
+    hubo_bloqueo = False
 
-    if not info:
-        msg = registro.texto() or "yt-dlp no devolvió información del video"
-        anti_bloqueo.registrar_resultado(exito=False, mensaje_error=msg)
-        raise ErrorDescarga(msg)
-    anti_bloqueo.registrar_resultado(exito=True)
+    for n, intento in enumerate(plan):
+        if n > 0:
+            time.sleep(random.uniform(2.0, 5.0))
+        registro = anti_bloqueo.RegistroErrores()
+        opts = _opciones_descarga(carpeta_temp, ffmpeg_path, registro)
+        especificas = anti_bloqueo.opciones_para_intento(intento)
+        if "cookiesfrombrowser" not in especificas:
+            opts.pop("cookiesfrombrowser", None)  # este intento va SIN cookies
+        opts.update(especificas)
+        if intento.get("permisivo"):
+            opts["format"] = "bestaudio/best/best"
+        info = None
+        try:
+            with anti_bloqueo.crear_ydl(opts) as ydl:
+                info = ydl.extract_info(url_video, download=True)
+        except Exception as exc:
+            ultimo_error = f"{exc} | {registro.texto()}"
+        else:
+            if not info:
+                ultimo_error = registro.texto() or "yt-dlp no devolvió información del video"
 
-    ruta_mp3 = os.path.join(carpeta_temp, f"{info.get('id')}.mp3")
-    if not os.path.isfile(ruta_mp3):
-        raise ErrorDescarga("FFmpeg no generó el mp3 (¿falta FFmpeg o falló la conversión?)")
-    return ruta_mp3
+        if info:
+            ruta_mp3 = os.path.join(carpeta_temp, f"{info.get('id')}.mp3")
+            if os.path.isfile(ruta_mp3):
+                anti_bloqueo.registrar_resultado(exito=True)
+                if intento.get("clientes") and not intento.get("permisivo"):
+                    anti_bloqueo.registrar_cliente(intento["clientes"], True)
+                if n > 0 and hubo_bloqueo and notas is not None:
+                    notas.append(f"bloqueo esquivado cambiando de método ({intento['nombre']})")
+                return ruta_mp3
+            ultimo_error = "FFmpeg no generó el mp3 (¿falta FFmpeg o falló la conversión?)"
+            break  # no es un bloqueo: cambiar de cliente no lo arregla
+
+        log.warning("Intento '%s' falló: %s", intento["nombre"], ultimo_error[:200])
+        if anti_bloqueo.es_error_no_disponible(ultimo_error):
+            break  # borrado/privado/país: no tiene sentido seguir probando
+        if anti_bloqueo.es_error_de_bloqueo(ultimo_error):
+            hubo_bloqueo = True
+            if intento.get("clientes") and not intento.get("permisivo"):
+                anti_bloqueo.registrar_cliente(intento["clientes"], False)
+            continue
+        # Error que no parece bloqueo (red caída, etc.): tampoco lo arregla otro método.
+        break
+
+    anti_bloqueo.registrar_resultado(exito=False, mensaje_error=ultimo_error)
+    raise ErrorDescarga(ultimo_error or "no se pudo descargar")
 
 
 def _exe_ffmpeg(ffmpeg_path):
@@ -242,7 +281,7 @@ def procesar_tema(url_video, artista, nombre_tema, numero_tema, nombre_album,
 
     try:
         etapa("Descargando")
-        ruta_descargada = descargar_audio(url_video, carpeta_temp, ffmpeg_path)
+        ruta_descargada = descargar_audio(url_video, carpeta_temp, ffmpeg_path, notas=arreglos)
 
         etapa("Validando")
         ok, motivo, dur = validar_mp3(ruta_descargada, duracion_esperada)
