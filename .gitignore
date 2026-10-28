@@ -12,3 +12,4 @@ config/*.tmp
 # Respaldos locales y restos
 _backup_antes_de_cambios/
 _to_delete/
+config/sesion_pendiente.json

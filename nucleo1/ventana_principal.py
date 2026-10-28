@@ -21,6 +21,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 import webbrowser
 from tkinter import messagebox, ttk
@@ -28,13 +29,19 @@ from tkinter import messagebox, ttk
 import anti_bloqueo
 from buscador_youtube import buscar_mejor_resultado, buscar_playlists_artista, obtener_tracklist_playlist
 from descargador import procesar_tema
-from utils import ruta_carpeta_album, ruta_descargas_base, sanitizar_nombre, tema_ya_descargado
-from ventana_dependencias import guardar_config_app, ruta_ffmpeg_ejecutable
+from utils import (
+    escribir_json_atomico, leer_json_seguro, ruta_carpeta_album, ruta_descargas_base,
+    sanitizar_nombre, tema_ya_descargado,
+)
+from ventana_dependencias import (
+    RUTA_CONFIG_DIR, guardar_config_app, ruta_ffmpeg_ejecutable,
+)
 
 log = logging.getLogger("albumes.principal")
 
 MAX_HISTORIAL_BUSQUEDAS = 20
 MAX_INTENTOS = 3
+RUTA_SESION = os.path.join(RUTA_CONFIG_DIR, "sesion_pendiente.json")
 MAX_LINEAS_LOG = 3000
 
 
@@ -73,6 +80,7 @@ class VentanaPrincipal:
         self._ultimo_sleep_informado = None
         self._gen_busqueda = 0         # descarta respuestas de búsquedas viejas
         self._gen_tracklist = 0        # descarta tracklists de clicks viejos
+        self._sesion_terminada = False  # True si la última tanda llegó hasta el final
         self._cola_estado = {}         # fila de la lista -> estado visible del tema en proceso
 
         self.ventana = tk.Tk()
@@ -83,6 +91,7 @@ class VentanaPrincipal:
 
         self._construir_ui()
         self.ventana.protocol("WM_DELETE_WINDOW", self._on_cerrar)
+        self._programar(400, self._ofrecer_continuar)
 
     @staticmethod
     def _carpeta_ffmpeg():
@@ -466,7 +475,57 @@ class VentanaPrincipal:
         self.config_data["buscar_mejor_version"] = mejor_version
         self.config_data["normalizar_volumen"] = bool(self.var_normalizar.get())
         self._guardar_config()
+        self._iniciar_descarga(seleccionados, artista, mejor_version)
 
+    # ---- sesión pendiente: retomar si el programa se cerró a medias ------
+    def _guardar_sesion(self, seleccionados, artista, mejor_version):
+        try:
+            escribir_json_atomico(RUTA_SESION, {
+                "artista": artista,
+                "mejor_version": mejor_version,
+                "albumes": [{k: a.get(k) for k in ("titulo", "url", "id", "cantidad")} for a in seleccionados],
+            })
+        except Exception:
+            log.warning("No se pudo guardar la sesión pendiente", exc_info=True)
+
+    @staticmethod
+    def _borrar_sesion():
+        try:
+            os.remove(RUTA_SESION)
+        except OSError:
+            pass
+
+    def _ofrecer_continuar(self):
+        if self._descargando:
+            return
+        datos = leer_json_seguro(RUTA_SESION, None)
+        if not isinstance(datos, dict) or not datos.get("albumes") or not datos.get("artista"):
+            self._borrar_sesion()
+            return
+        albumes = [a for a in datos["albumes"] if isinstance(a, dict) and a.get("url")]
+        if not albumes:
+            self._borrar_sesion()
+            return
+        nombres = "\n".join(f"  • {a.get('titulo', '?')}" for a in albumes[:8])
+        if len(albumes) > 8:
+            nombres += f"\n  … y {len(albumes) - 8} más"
+        seguir = messagebox.askyesno(
+            "Descarga sin terminar",
+            f"La última vez quedó una descarga sin terminar de {datos['artista']}:\n\n{nombres}\n\n"
+            "¿Querés continuar donde quedó?\n(Lo que ya se descargó se omite.)",
+            parent=self.ventana,
+        )
+        if not seguir:
+            self._borrar_sesion()
+            return
+        self.var_artista_carpeta.set(datos["artista"])
+        self.var_busqueda.set(datos["artista"])
+        self.var_mejor_version.set(bool(datos.get("mejor_version")))
+        self._iniciar_descarga(albumes, datos["artista"], bool(datos.get("mejor_version")))
+
+    def _iniciar_descarga(self, seleccionados, artista, mejor_version):
+        self._guardar_sesion(seleccionados, artista, mejor_version)
+        self._sesion_terminada = False
         self._descargando = True
         self._cancelar_descarga.clear()
         self.btn_descargar.config(state="disabled", bg="#95a5a6", text="⏳ Descargando...")
@@ -639,6 +698,8 @@ class VentanaPrincipal:
                            "se retoma donde quedó.")
         elif detenida:
             self._log_hilo("⏹ Descarga detenida por el usuario.")
+        else:
+            self._sesion_terminada = True
         resumen = (f"🏁 Resumen: {descargados} descargados, {omitidos} ya existían, "
                    f"{len(fallidos)} con error, {len(no_disponibles)} no disponibles en YouTube.")
         self._log_hilo(resumen)
@@ -802,7 +863,7 @@ class VentanaPrincipal:
         for _ in range(100):
             if all("_fila" in t for t in trabajo):
                 return
-            self._esperar(0.05)
+            time.sleep(0.05)
 
     def _resumen_ok(self, tarea, ruta_final):
         m = re.match(r"\[(\d+|SD) BPM\]", os.path.basename(ruta_final))
@@ -821,6 +882,8 @@ class VentanaPrincipal:
         self._config_seguro(self.lbl_estado, text=f"Progreso: {completados}/{total} temas")
 
     def _finalizar_descarga(self):
+        if self._sesion_terminada:
+            self._borrar_sesion()
         self._descargando = False
         self._cancelar_descarga.clear()
         self._config_seguro(self.btn_buscar, state="normal")
