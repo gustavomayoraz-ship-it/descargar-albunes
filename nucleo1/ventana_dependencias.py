@@ -34,7 +34,7 @@ from utils import escribir_json_atomico, leer_json_seguro
 log = logging.getLogger("albumes.dependencias")
 
 # RUTA_BASE es la raíz del proyecto (un nivel arriba de nucleo1/, donde vive
-# main.py), para que config/, ffmpeg/ y deno/ queden siempre al lado de main.py.
+# descargar_albunes.py), para que config/, ffmpeg/ y deno/ queden siempre al lado de descargar_albunes.py.
 RUTA_BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUTA_CONFIG_DIR = os.path.join(RUTA_BASE, "config")
 RUTA_CONFIG_APP = os.path.join(RUTA_CONFIG_DIR, "config_app.json")

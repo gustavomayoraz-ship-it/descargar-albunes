@@ -157,8 +157,8 @@ def tema_ya_descargado(carpeta_album, numero_tema):
 
 
 def ruta_descargas_base():
-    # Un nivel arriba de nucleo1/ (la raíz del proyecto, donde vive main.py),
-    # para que "Desc_Albunes" quede al lado de main.py y no dentro de nucleo1/.
+    # Un nivel arriba de nucleo1/ (la raíz del proyecto, donde vive descargar_albunes.py),
+    # para que "Desc_Albunes" quede al lado de descargar_albunes.py y no dentro de nucleo1/.
     raiz_proyecto = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     base = os.path.join(raiz_proyecto, "Desc_Albunes")
     os.makedirs(base, exist_ok=True)

@@ -2,7 +2,7 @@
 """
 Punto de entrada de Descargar_Albunes.
 Todo el código (ventanas, búsqueda, descarga) vive dentro de la carpeta
-"nucleo1", al lado de este archivo. Se ejecuta con "python main.py" (o con
+"nucleo1", al lado de este archivo. Se ejecuta con "py -3.14 descargar_albunes.py" (o con
 Iniciar.bat, que usa pythonw).
 
 Muestra primero la ventana de verificación de dependencias y, recién al

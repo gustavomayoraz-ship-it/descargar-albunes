@@ -6,4 +6,4 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-start "" pyw -3.14 main.py
+start "" pyw -3.14 descargar_albunes.py
