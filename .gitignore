@@ -1,0 +1,14 @@
+# Descargas de música y binarios pesados (se reinstalan desde la ventana de dependencias)
+Desc_Albunes/
+ffmpeg/
+deno/
+# Caché y archivos de ejecución
+__pycache__/
+*.pyc
+config/app.log*
+config/estado_antibloqueo.json
+config/*.corrupto
+config/*.tmp
+# Respaldos locales y restos
+_backup_antes_de_cambios/
+_to_delete/
