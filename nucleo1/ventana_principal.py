@@ -15,6 +15,7 @@ Ventana principal de Descargar_Albunes:
 """
 
 import logging
+import math
 import os
 import random
 import re
@@ -62,6 +63,30 @@ COLOR_ERROR = "#b91c1c"
 COLOR_OMITIDO = "#334155"
 
 
+# ----------------------------------------------------------------------
+# Tema visual (oscuro, con acentos violeta/cian)
+# ----------------------------------------------------------------------
+T = {
+    "fondo": "#0b0e22", "panel": "#12163a", "card": "#171c47", "card2": "#1f2557",
+    "card_sel": "#2b2f78", "borde": "#2a3070",
+    "texto": "#eef0ff", "suave": "#8f97d1", "tenue": "#5d65a3",
+    "acento": "#7c3aed", "acento2": "#06b6d4", "acento_hover": "#8b5cf6",
+    "ok": "#10b981", "ok_hover": "#34d399", "stop": "#ef4444", "stop_hover": "#f87171",
+    "off": "#3a4079", "error": "#fb7185", "aviso": "#fbbf24",
+}
+FUENTE = "Segoe UI"
+
+
+def _rgb(hex_):
+    hex_ = hex_.lstrip("#")
+    return tuple(int(hex_[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _mezclar(c1, c2, t):
+    a, b = _rgb(c1), _rgb(c2)
+    return "#%02x%02x%02x" % tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
+
+
 class _Abortar(Exception):
     """Demasiados bloqueos seguidos: se frena toda la descarga."""
 
@@ -85,9 +110,9 @@ class VentanaPrincipal:
 
         self.ventana = tk.Tk()
         self.ventana.title("🎵 Descargar Álbumes")
-        self.ventana.configure(bg="#f8f9fa")
-        self.ventana.geometry("980x860")
-        self.ventana.minsize(760, 520)
+        self.ventana.configure(bg=T["fondo"])
+        self.ventana.geometry("1120x900")
+        self.ventana.minsize(900, 700)
 
         self._construir_ui()
         self.ventana.protocol("WM_DELETE_WINDOW", self._on_cerrar)
@@ -125,170 +150,355 @@ class VentanaPrincipal:
             pass
 
     # ------------------------------------------------------------------
+    def _boton(self, padre, texto, comando, color, color_hover, **kw):
+        """Botón plano con efecto al pasar el mouse."""
+        b = tk.Button(
+            padre, text=texto, command=comando, bg=color, fg="white", relief="flat", bd=0,
+            font=(FUENTE, 10, "bold"), cursor="hand2", activebackground=color_hover,
+            activeforeground="white", padx=16, pady=7, **kw,
+        )
+        estado = {"orig": None}
+
+        def entrar(_e):
+            if str(b["state"]) == "normal" and estado["orig"] is None:
+                estado["orig"] = b["bg"]
+                b.config(bg=_mezclar(b["bg"], "#ffffff", 0.16))
+
+        def salir(_e):
+            if estado["orig"] is not None:
+                if str(b["state"]) == "normal":
+                    b.config(bg=estado["orig"])
+                estado["orig"] = None
+
+        b.bind("<Enter>", entrar)
+        b.bind("<Leave>", salir)
+        return b
+
+    def _estilos(self):
+        st = ttk.Style(self.ventana)
+        try:
+            st.theme_use("clam")
+        except tk.TclError:
+            pass
+        st.configure("Dark.Treeview", background=T["card"], fieldbackground=T["card"],
+                     foreground=T["texto"], rowheight=28, borderwidth=0, font=(FUENTE, 10))
+        st.map("Dark.Treeview", background=[("selected", T["card_sel"])],
+               foreground=[("selected", "white")])
+        st.configure("Dark.Treeview.Heading", background=T["card2"], foreground=T["suave"],
+                     relief="flat", font=(FUENTE, 9, "bold"), borderwidth=0)
+        st.map("Dark.Treeview.Heading", background=[("active", T["card_sel"])])
+        st.configure("Dark.Vertical.TScrollbar", background=T["card2"], troughcolor=T["card"],
+                     bordercolor=T["card"], arrowcolor=T["suave"], lightcolor=T["card2"],
+                     darkcolor=T["card2"], relief="flat")
+        st.map("Dark.Vertical.TScrollbar", background=[("active", T["acento"])])
+        st.configure("Neon.Horizontal.TProgressbar", troughcolor=T["card"], background=T["acento2"],
+                     bordercolor=T["panel"], lightcolor=T["acento2"], darkcolor=T["acento"], thickness=10)
+        st.configure("Dark.TCombobox", fieldbackground=T["card2"], background=T["card2"],
+                     foreground=T["texto"], arrowcolor=T["acento2"], bordercolor=T["borde"],
+                     lightcolor=T["card2"], darkcolor=T["card2"], insertcolor=T["texto"],
+                     selectbackground=T["card2"], selectforeground=T["texto"])
+        st.map("Dark.TCombobox", fieldbackground=[("readonly", T["card2"])],
+               foreground=[("readonly", T["texto"])])
+        self.ventana.option_add("*TCombobox*Listbox.background", T["card2"])
+        self.ventana.option_add("*TCombobox*Listbox.foreground", T["texto"])
+        self.ventana.option_add("*TCombobox*Listbox.selectBackground", T["acento"])
+        self.ventana.option_add("*TCombobox*Listbox.font", (FUENTE, 10))
+
+    def _chip(self, padre, titulo, variable, color):
+        f = tk.Frame(padre, bg=T["fondo"], padx=12, pady=5, highlightthickness=1,
+                     highlightbackground=color)
+        tk.Label(f, textvariable=variable, font=(FUENTE, 15, "bold"), bg=T["fondo"], fg=color).pack()
+        tk.Label(f, text=titulo, font=(FUENTE, 7, "bold"), bg=T["fondo"], fg=T["suave"]).pack()
+        return f
+
+    def _tarjeta(self, padre, titulo, icono):
+        """Panel oscuro con barra de título. Devuelve (marco_externo, cuerpo)."""
+        ext = tk.Frame(padre, bg=T["borde"], padx=1, pady=1)
+        interior = tk.Frame(ext, bg=T["card"])
+        interior.pack(fill="both", expand=True)
+        cab = tk.Frame(interior, bg=T["card2"])
+        cab.pack(fill="x")
+        tk.Frame(cab, bg=T["acento2"], width=4).pack(side="left", fill="y")
+        lbl = tk.Label(cab, text=f"{icono}  {titulo}", font=(FUENTE, 10, "bold"), bg=T["card2"],
+                       fg=T["texto"], anchor="w", padx=10, pady=7)
+        lbl.pack(side="left", fill="x", expand=True)
+        cuerpo = tk.Frame(interior, bg=T["card"])
+        cuerpo.pack(fill="both", expand=True)
+        return ext, cuerpo, lbl
+
     def _construir_ui(self):
-        contenedor = tk.Frame(self.ventana, bg="#f8f9fa", padx=14, pady=12)
+        self._estilos()
+        self.ventana.configure(bg=T["fondo"])
+
+        # estadísticas del encabezado
+        self.var_stat_total = tk.StringVar(value="0")
+        self.var_stat_ok = tk.StringVar(value="0")
+        self.var_stat_omit = tk.StringVar(value="0")
+        self.var_stat_err = tk.StringVar(value="0")
+        self._stats = {"total": 0, "ok": 0, "omit": 0, "err": 0}
+
+        # ---- encabezado con degradado + ecualizador ----
+        self.cab = tk.Canvas(self.ventana, height=104, highlightthickness=0, bg=T["fondo"])
+        self.cab.pack(fill="x")
+        self._barras = []
+        self._eq_fase = 0.0
+        self._eq_corriendo = False
+        self.cab.create_text(28, 38, anchor="w", text="Descargar Álbumes", fill="white",
+                             font=(FUENTE, 24, "bold"), tags="titulo")
+        self.cab.create_text(30, 70, anchor="w", fill="#dcd6ff", tags="subtitulo",
+                             text="Buscá un artista · escuchá los temas · bajá discos completos en máxima calidad",
+                             font=(FUENTE, 10))
+        marco_chips = tk.Frame(self.cab, bg=T["fondo"])
+        self._chip(marco_chips, "TEMAS", self.var_stat_total, T["acento2"]).pack(side="left", padx=4)
+        self._chip(marco_chips, "LISTOS", self.var_stat_ok, T["ok"]).pack(side="left", padx=4)
+        self._chip(marco_chips, "OMITIDOS", self.var_stat_omit, T["aviso"]).pack(side="left", padx=4)
+        self._chip(marco_chips, "ERRORES", self.var_stat_err, T["error"]).pack(side="left", padx=4)
+        self._ventana_chips = self.cab.create_window(0, 40, window=marco_chips, anchor="e", tags="chips")
+        self.cab.bind("<Configure>", self._redibujar_cabecera)
+
+        contenedor = tk.Frame(self.ventana, bg=T["fondo"], padx=18, pady=12)
         contenedor.pack(fill="both", expand=True)
 
-        tk.Label(
-            contenedor, text="🎵 Descargar Álbumes", font=("Segoe UI", 14, "bold"),
-            bg="#f8f9fa", fg="#2c3e50",
-        ).pack(anchor="w")
-        tk.Label(
-            contenedor, text="Buscá un artista, mirá el contenido de cada álbum, escuchalo en YouTube y descargá",
-            font=("Segoe UI", 9), bg="#f8f9fa", fg="#7f8c8d",
-        ).pack(anchor="w", pady=(0, 10))
-
-        fila_busqueda = tk.Frame(contenedor, bg="#f8f9fa")
-        fila_busqueda.pack(fill="x", pady=(0, 8))
+        # ---- búsqueda ----
+        fila_busqueda = tk.Frame(contenedor, bg=T["fondo"])
+        fila_busqueda.pack(fill="x", pady=(0, 10))
+        marco_entrada = tk.Frame(fila_busqueda, bg=T["acento"], padx=2, pady=2)
+        marco_entrada.pack(side="left", fill="x", expand=True)
+        tk.Label(marco_entrada, text=" 🔍", bg=T["card2"], fg=T["acento2"], font=(FUENTE, 13)).pack(
+            side="left", fill="y")
         self.var_busqueda = tk.StringVar()
         self.combo_busqueda = ttk.Combobox(
-            fila_busqueda, textvariable=self.var_busqueda, font=("Segoe UI", 11),
+            marco_entrada, textvariable=self.var_busqueda, font=(FUENTE, 13), style="Dark.TCombobox",
             values=self.config_data.get("historial_busquedas", []),
         )
-        self.combo_busqueda.pack(side="left", fill="x", expand=True, ipady=4)
+        self.combo_busqueda.pack(side="left", fill="x", expand=True, ipady=6)
         self.combo_busqueda.bind("<Return>", lambda e: self._on_buscar())
         self.combo_busqueda.bind("<<ComboboxSelected>>", lambda e: self._on_buscar())
-        self.btn_buscar = tk.Button(
-            fila_busqueda, text="🔍 Buscar", font=("Segoe UI", 10, "bold"),
-            bg="#2980b9", fg="white", relief="flat", padx=12, command=self._on_buscar,
-        )
-        self.btn_buscar.pack(side="left", padx=(8, 0))
+        self.btn_buscar = self._boton(fila_busqueda, "Buscar", self._on_buscar, T["acento"], T["acento_hover"])
+        self.btn_buscar.config(padx=26, pady=10, font=(FUENTE, 11, "bold"))
+        self.btn_buscar.pack(side="left", padx=(10, 0))
 
-        fila_seleccion = tk.Frame(contenedor, bg="#f8f9fa")
-        fila_seleccion.pack(fill="x")
+        fila_seleccion = tk.Frame(contenedor, bg=T["fondo"])
+        fila_seleccion.pack(fill="x", pady=(0, 6))
         self.var_seleccionar_todos = tk.BooleanVar(value=False)
         tk.Checkbutton(
             fila_seleccion, text="Seleccionar todos", variable=self.var_seleccionar_todos,
-            bg="#f8f9fa", command=self._toggle_seleccionar_todos,
+            bg=T["fondo"], fg=T["texto"], selectcolor=T["card2"], activebackground=T["fondo"],
+            activeforeground=T["texto"], font=(FUENTE, 9, "bold"), bd=0, highlightthickness=0,
+            command=self._toggle_seleccionar_todos,
         ).pack(side="left")
         tk.Label(
-            fila_seleccion,
-            text="  ·  Click en un álbum para ver sus temas · Doble click en un tema para abrirlo en YouTube",
-            bg="#f8f9fa", fg="#7f8c8d", font=("Segoe UI", 8),
+            fila_seleccion, text="   Click en un álbum para ver sus temas  ·  Doble click en un tema para escucharlo en YouTube",
+            bg=T["fondo"], fg=T["tenue"], font=(FUENTE, 8),
         ).pack(side="left")
 
-        # ---- Panel dividido: álbumes a la izquierda, tracklist a la derecha ----
-        paned = tk.PanedWindow(contenedor, orient="horizontal", sashwidth=6, bg="#f8f9fa")
-        paned.pack(fill="both", expand=True, pady=(4, 10))
+        # ---- panel dividido: álbumes | temas ----
+        paned = tk.PanedWindow(contenedor, orient="horizontal", sashwidth=10, bg=T["fondo"],
+                               bd=0, sashrelief="flat")
+        paned.pack(fill="both", expand=True, pady=(0, 10))
 
-        marco_lista = tk.Frame(paned, bg="white", bd=1, relief="solid")
-        self.canvas = tk.Canvas(marco_lista, bg="white", highlightthickness=0)
-        scrollbar = ttk.Scrollbar(marco_lista, orient="vertical", command=self.canvas.yview)
-        self.frame_resultados = tk.Frame(self.canvas, bg="white")
+        marco_lista, cuerpo_albumes, _ = self._tarjeta(paned, "Álbumes encontrados", "💿")
+        self.canvas = tk.Canvas(cuerpo_albumes, bg=T["card"], highlightthickness=0, yscrollincrement=24)
+        scrollbar = ttk.Scrollbar(cuerpo_albumes, orient="vertical", command=self.canvas.yview,
+                                  style="Dark.Vertical.TScrollbar")
+        self.frame_resultados = tk.Frame(self.canvas, bg=T["card"])
         self.frame_resultados.bind(
             "<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         )
-        self.canvas.create_window((0, 0), window=self.frame_resultados, anchor="nw")
+        self._ventana_resultados = self.canvas.create_window((0, 0), window=self.frame_resultados, anchor="nw")
+        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfigure(self._ventana_resultados, width=e.width))
         self.canvas.configure(yscrollcommand=scrollbar.set)
         self.canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
+        # Rueda del mouse: funciona en toda la zona de álbumes (también sobre cada fila).
+        for evento in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.ventana.bind_all(evento, self._rueda_albumes, add="+")
 
         self.lbl_sin_resultados = tk.Label(
-            self.frame_resultados, text="Buscá un artista para ver sus álbumes acá.",
-            bg="white", fg="#7f8c8d", font=("Segoe UI", 9), padx=8, pady=8,
+            self.frame_resultados, text="🎧\nBuscá un artista para ver sus álbumes acá.",
+            bg=T["card"], fg=T["suave"], font=(FUENTE, 10), padx=12, pady=30, justify="center",
         )
-        self.lbl_sin_resultados.pack(anchor="w")
+        self.lbl_sin_resultados.pack(fill="x")
 
-        marco_tracklist = tk.Frame(paned, bg="white", bd=1, relief="solid")
-        self.lbl_panel_derecho = tk.Label(
-            marco_tracklist, text="Temas del álbum", font=("Segoe UI", 9, "bold"),
-            bg="white", fg="#2c3e50", anchor="w", wraplength=320, justify="left",
-        )
-        self.lbl_panel_derecho.pack(fill="x", padx=8, pady=(8, 4))
-
+        marco_tracklist, cuerpo_temas, self.lbl_panel_derecho = self._tarjeta(paned, "Temas del álbum", "🎼")
         self.tree_tracklist = ttk.Treeview(
-            marco_tracklist, columns=("numero", "titulo"), show="headings", selectmode="browse",
+            cuerpo_temas, columns=("numero", "titulo"), show="headings", selectmode="browse",
+            style="Dark.Treeview",
         )
         self.tree_tracklist.heading("numero", text="#")
         self.tree_tracklist.heading("titulo", text="Tema")
-        self.tree_tracklist.column("numero", width=36, anchor="center", stretch=False)
+        self.tree_tracklist.column("numero", width=40, anchor="center", stretch=False)
         self.tree_tracklist.column("titulo", width=260, anchor="w")
-        self.tree_tracklist.pack(fill="both", expand=True, padx=8, pady=(0, 4))
+        sc_temas = ttk.Scrollbar(cuerpo_temas, orient="vertical", command=self.tree_tracklist.yview,
+                                 style="Dark.Vertical.TScrollbar")
+        self.tree_tracklist.configure(yscrollcommand=sc_temas.set)
+        self.lbl_reproduciendo = tk.Label(
+            cuerpo_temas, text="▶  Doble click en un tema para abrirlo en YouTube",
+            bg=T["card"], fg=T["suave"], font=(FUENTE, 8), anchor="w", wraplength=340, justify="left",
+        )
+        self.lbl_reproduciendo.pack(side="bottom", fill="x", padx=10, pady=(4, 8))
+        sc_temas.pack(side="right", fill="y")
+        self.tree_tracklist.pack(side="left", fill="both", expand=True)
         self.tree_tracklist.bind("<Double-1>", self._on_doble_click_tema)
 
-        self.lbl_reproduciendo = tk.Label(
-            marco_tracklist, text="Doble click en un tema para abrirlo en YouTube",
-            bg="white", fg="#7f8c8d", font=("Segoe UI", 8), anchor="w",
-            wraplength=320, justify="left",
-        )
-        self.lbl_reproduciendo.pack(fill="x", padx=8, pady=(0, 8))
+        paned.add(marco_lista, minsize=300, width=480)
+        paned.add(marco_tracklist, minsize=300, width=420)
 
-        paned.add(marco_lista, minsize=280, width=420)
-        paned.add(marco_tracklist, minsize=280, width=340)
-
-        # ---- Opciones de descarga ----
-        fila_opciones = tk.Frame(contenedor, bg="#f8f9fa")
-        fila_opciones.pack(fill="x", pady=(0, 6))
-        tk.Label(
-            fila_opciones, text="Artista (carpeta y tags):", bg="#f8f9fa",
-            font=("Segoe UI", 9), fg="#2c3e50",
-        ).pack(side="left")
+        # ---- opciones ----
+        fila_opciones = tk.Frame(contenedor, bg=T["fondo"])
+        fila_opciones.pack(fill="x", pady=(0, 8))
+        tk.Label(fila_opciones, text="Artista (carpeta y tags)", bg=T["fondo"],
+                 font=(FUENTE, 9, "bold"), fg=T["suave"]).pack(side="left")
+        marco_art = tk.Frame(fila_opciones, bg=T["borde"], padx=1, pady=1)
+        marco_art.pack(side="left", padx=(8, 18))
         self.var_artista_carpeta = tk.StringVar()
-        tk.Entry(fila_opciones, textvariable=self.var_artista_carpeta, width=28).pack(side="left", padx=(6, 14))
+        tk.Entry(marco_art, textvariable=self.var_artista_carpeta, width=26, bg=T["card2"],
+                 fg=T["texto"], insertbackground=T["texto"], relief="flat",
+                 font=(FUENTE, 10)).pack(ipady=4, padx=2)
         self.var_mejor_version = tk.BooleanVar(value=bool(self.config_data.get("buscar_mejor_version", False)))
-        tk.Checkbutton(
-            fila_opciones, text="Buscar la mejor versión de cada tema (más lento)",
-            variable=self.var_mejor_version, bg="#f8f9fa", font=("Segoe UI", 9),
-        ).pack(side="left")
-
         self.var_normalizar = tk.BooleanVar(value=bool(self.config_data.get("normalizar_volumen", True)))
-        tk.Checkbutton(
-            fila_opciones, text="Igualar el volumen de todos los temas (-14 LUFS)",
-            variable=self.var_normalizar, bg="#f8f9fa", font=("Segoe UI", 9),
-        ).pack(side="left", padx=(14, 0))
+        for texto, var in (("🔎  Mejor versión de cada tema (más lento)", self.var_mejor_version),
+                           ("🔊  Igualar volumen (-14 LUFS)", self.var_normalizar)):
+            tk.Checkbutton(
+                fila_opciones, text=texto, variable=var, bg=T["fondo"], fg=T["texto"],
+                selectcolor=T["card2"], activebackground=T["fondo"], activeforeground=T["texto"],
+                font=(FUENTE, 9), bd=0, highlightthickness=0,
+            ).pack(side="left", padx=(0, 14))
 
-        fila_descarga = tk.Frame(contenedor, bg="#f8f9fa")
+        # ---- botones de acción ----
+        fila_descarga = tk.Frame(contenedor, bg=T["fondo"])
         fila_descarga.pack(fill="x")
-        self.btn_descargar = tk.Button(
-            fila_descarga, text="⬇️ Descargar seleccionados", font=("Segoe UI", 10, "bold"),
-            bg="#95a5a6", fg="white", relief="flat", padx=12, pady=4, state="disabled",
-            command=self._on_descargar,
-        )
+        self.btn_descargar = self._boton(fila_descarga, "⬇  Descargar seleccionados", self._on_descargar,
+                                         T["off"], T["ok_hover"], state="disabled")
+        self.btn_descargar.config(padx=24, pady=10, font=(FUENTE, 11, "bold"))
         self.btn_descargar.pack(side="left")
+        self.btn_detener_descarga = self._boton(fila_descarga, "⏹  Detener", self._on_detener_descarga,
+                                                T["off"], T["stop_hover"], state="disabled")
+        self.btn_detener_descarga.config(pady=10)
+        self.btn_detener_descarga.pack(side="left", padx=(10, 0))
+        self.btn_abrir_carpeta = self._boton(fila_descarga, "📂  Abrir carpeta", self._on_abrir_carpeta_descargas,
+                                             T["card2"], T["card_sel"])
+        self.btn_abrir_carpeta.config(pady=10)
+        self.btn_abrir_carpeta.pack(side="right")
 
-        self.btn_detener_descarga = tk.Button(
-            fila_descarga, text="⏹ Detener descarga", font=("Segoe UI", 10, "bold"),
-            bg="#95a5a6", fg="white", relief="flat", padx=12, pady=4, state="disabled",
-            command=self._on_detener_descarga,
-        )
-        self.btn_detener_descarga.pack(side="left", padx=(8, 0))
-
-        self.btn_abrir_carpeta = tk.Button(
-            fila_descarga, text="📂 Abrir carpeta de descargas", font=("Segoe UI", 10, "bold"),
-            bg="#2c3e50", fg="white", relief="flat", padx=12, pady=4,
-            command=self._on_abrir_carpeta_descargas,
-        )
-        self.btn_abrir_carpeta.pack(side="left", padx=(8, 0))
-
-        self.progressbar = ttk.Progressbar(contenedor, mode="determinate", length=380)
-        self.progressbar.pack(fill="x", pady=(8, 4))
+        self.progressbar = ttk.Progressbar(contenedor, mode="determinate", length=380,
+                                           style="Neon.Horizontal.TProgressbar")
+        self.progressbar.pack(fill="x", pady=(12, 4))
 
         self.lbl_estado = tk.Label(
-            contenedor, text="", font=("Segoe UI", 9), bg="#f8f9fa", fg="#2c3e50", anchor="w",
+            contenedor, text="Listo para descargar.", font=(FUENTE, 9), bg=T["fondo"],
+            fg=T["suave"], anchor="w",
         )
         self.lbl_estado.pack(fill="x")
 
-        tk.Label(
-            contenedor, text="📋 Temas en proceso (descarga, análisis y arreglos aplicados)",
-            font=("Segoe UI", 9, "bold"), bg="#f8f9fa", fg="#2c3e50", anchor="w",
-        ).pack(fill="x", pady=(8, 2))
-        marco_cola = tk.Frame(contenedor, bg="#f8f9fa")
-        marco_cola.pack(fill="both", expand=True)
+        # ---- lista de temas en proceso ----
+        marco_cola_ext, cuerpo_cola, _ = self._tarjeta(contenedor, "Temas en proceso · descarga, análisis y arreglos", "📋")
+        marco_cola_ext.pack(fill="both", expand=True, pady=(8, 0))
         self.lista_cola = tk.Listbox(
-            marco_cola, height=9, font=("Segoe UI", 10), activestyle="none",
-            bg="#1e293b", fg="#e2e8f0", selectbackground="#334155", selectforeground="white",
+            cuerpo_cola, height=9, font=(FUENTE, 10), activestyle="none",
+            bg=T["card"], fg=T["texto"], selectbackground=T["card_sel"], selectforeground="white",
             relief="flat", bd=0, highlightthickness=0,
         )
-        scroll_cola = ttk.Scrollbar(marco_cola, orient="vertical", command=self.lista_cola.yview)
+        scroll_cola = ttk.Scrollbar(cuerpo_cola, orient="vertical", command=self.lista_cola.yview,
+                                    style="Dark.Vertical.TScrollbar")
         self.lista_cola.configure(yscrollcommand=scroll_cola.set)
-        self.lista_cola.pack(side="left", fill="both", expand=True)
         scroll_cola.pack(side="right", fill="y")
+        self.lista_cola.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=4)
 
-        marco_log = tk.Frame(contenedor, bg="#f8f9fa")
-        marco_log.pack(fill="x", expand=False, pady=(6, 0))
-        self.texto_log = tk.Text(marco_log, height=5, font=("Consolas", 9), bg="#2c3e50", fg="#ecf0f1")
-        self.texto_log.pack(fill="both", expand=True)
+        marco_log = tk.Frame(contenedor, bg=T["fondo"])
+        marco_log.pack(fill="x", pady=(8, 0))
+        self.texto_log = tk.Text(marco_log, height=4, font=("Consolas", 9), bg="#080a1a", fg="#9fb0e8",
+                                 relief="flat", bd=0, padx=8, pady=6, insertbackground="white")
+        self.texto_log.pack(fill="x")
         self.texto_log.configure(state="disabled")
+
+    # ---- encabezado: degradado y ecualizador animado ----------------------
+    def _redibujar_cabecera(self, _e=None):
+        w = max(self.cab.winfo_width(), 200)
+        h = int(self.cab["height"])
+        self.cab.delete("grad")
+        paso = 4
+        for x in range(0, w, paso):
+            color = _mezclar("#4c1d95", "#0891b2", x / w)
+            self.cab.create_rectangle(x, 0, x + paso, h, fill=color, outline="", tags="grad")
+        self.cab.tag_lower("grad")
+        # barras del ecualizador (borde inferior)
+        self.cab.delete("barra")
+        self._barras = []
+        ancho, sep = 6, 5
+        n = w // (ancho + sep)
+        for i in range(n):
+            x = i * (ancho + sep) + 4
+            color = _mezclar(_mezclar("#4c1d95", "#0891b2", x / w), "#ffffff", 0.22)
+            item = self.cab.create_rectangle(x, h - 6, x + ancho, h, fill=color, outline="", tags="barra")
+            self._barras.append(item)
+        self.cab.tag_raise("titulo")
+        self.cab.tag_raise("subtitulo")
+        self.cab.tag_raise("chips")
+        self.cab.coords(self._ventana_chips, w - 22, 52)
+        self._eq_pintar()
+
+    def _eq_pintar(self):
+        h = int(self.cab["height"])
+        n = len(self._barras)
+        if not n:
+            return
+        for i, item in enumerate(self._barras):
+            if self._eq_corriendo:
+                v = 0.5 + 0.5 * math.sin(self._eq_fase + i * 0.55) * math.sin(self._eq_fase * 0.7 + i * 0.21)
+                alto = 4 + abs(v) * 34
+            else:
+                alto = 4 + 10 * abs(math.sin(i * 0.35)) * (0.4 + 0.6 * math.sin(i * 0.08 + 1) ** 2)
+            x1, _, x2, _ = self.cab.coords(item)
+            self.cab.coords(item, x1, h - alto, x2, h)
+
+    def _eq_animar(self):
+        if not self._descargando:
+            self._eq_corriendo = False
+            self._eq_pintar()
+            return
+        self._eq_fase += 0.55
+        self._eq_pintar()
+        self._programar(90, self._eq_animar)
+
+    def _eq_iniciar(self):
+        if not self._eq_corriendo:
+            self._eq_corriendo = True
+            self._eq_animar()
+
+    def _rueda_albumes(self, event):
+        """Mueve la lista de álbumes con la rueda cuando el mouse está sobre ella."""
+        try:
+            w = self.ventana.winfo_containing(event.x_root, event.y_root)
+        except (KeyError, tk.TclError):
+            return
+        while w is not None:
+            if w is self.canvas or w is self.frame_resultados:
+                break
+            w = getattr(w, "master", None)
+        else:
+            return
+        if w is None:
+            return
+        try:
+            if self.frame_resultados.winfo_reqheight() <= self.canvas.winfo_height():
+                return  # todo entra: no hay nada que mover
+            if getattr(event, "num", None) == 4:
+                paso = -1
+            elif getattr(event, "num", None) == 5:
+                paso = 1
+            else:
+                paso = -1 if event.delta > 0 else 1
+            self.canvas.yview_scroll(paso * 2, "units")
+        except tk.TclError:
+            pass
+
+    def _stats_set(self, **cambios):
+        self._stats.update(cambios)
+        self.var_stat_total.set(str(self._stats["total"]))
+        self.var_stat_ok.set(str(self._stats["ok"]))
+        self.var_stat_omit.set(str(self._stats["omit"]))
+        self.var_stat_err.set(str(self._stats["err"]))
 
     # ------------------------------------------------------------------
     # Búsqueda de álbumes
@@ -301,8 +511,8 @@ class VentanaPrincipal:
         self.var_artista_carpeta.set(artista)  # editable antes de descargar
         self._gen_busqueda += 1
         gen = self._gen_busqueda
-        self.btn_buscar.config(state="disabled", text="🔍 Buscando...")
-        self.btn_descargar.config(state="disabled", bg="#95a5a6")
+        self.btn_buscar.config(state="disabled", text="Buscando…")
+        self.btn_descargar.config(state="disabled", bg=T["off"])
         self._log(f"Buscando álbumes de: {artista}")
         threading.Thread(target=self._buscar_thread, args=(artista, gen), daemon=True).start()
 
@@ -343,7 +553,7 @@ class VentanaPrincipal:
         if error:
             tk.Label(
                 self.frame_resultados, text="No se pudo buscar (ver el registro de abajo).",
-                bg="white", fg="#c0392b", font=("Segoe UI", 9), padx=8, pady=8,
+                bg=T["card"], fg=T["error"], font=(FUENTE, 10), padx=12, pady=12,
             ).pack(anchor="w")
             msg = f"❌ Error al buscar: {error[:300]}"
             if anti_bloqueo.es_error_de_bloqueo(error):
@@ -352,23 +562,25 @@ class VentanaPrincipal:
         elif not resultados:
             tk.Label(
                 self.frame_resultados, text="No se encontraron álbumes/playlists para ese artista.",
-                bg="white", fg="#7f8c8d", font=("Segoe UI", 9), padx=8, pady=8,
+                bg=T["card"], fg=T["suave"], font=(FUENTE, 10), padx=12, pady=12,
             ).pack(anchor="w")
         else:
             for item in resultados:
                 var = tk.BooleanVar(value=False)
                 entry = {**item, "var": var}
-                fila = tk.Frame(self.frame_resultados, bg="white")
-                fila.pack(fill="x", padx=6, pady=2, anchor="w")
+                fila = tk.Frame(self.frame_resultados, bg=T["card"], highlightthickness=1,
+                                highlightbackground=T["borde"])
+                fila.pack(fill="x", padx=8, pady=3)
                 tk.Checkbutton(
-                    fila, variable=var, bg="white", command=self._actualizar_boton_descargar,
-                ).pack(side="left")
+                    fila, variable=var, bg=T["card"], selectcolor=T["card2"], activebackground=T["card"],
+                    bd=0, highlightthickness=0, command=self._actualizar_boton_descargar,
+                ).pack(side="left", padx=(4, 0))
                 texto = item["titulo"]
                 if item.get("cantidad"):
                     texto += f"  ({item['cantidad']} temas)"
                 lbl = tk.Label(
-                    fila, text=texto, bg="white", font=("Segoe UI", 9), anchor="w",
-                    wraplength=300, justify="left", cursor="hand2",
+                    fila, text=texto, bg=T["card"], fg=T["texto"], font=(FUENTE, 10), anchor="w",
+                    wraplength=330, justify="left", cursor="hand2", pady=8,
                 )
                 lbl.pack(side="left", fill="x", expand=True)
                 entry["_fila"] = fila
@@ -377,7 +589,7 @@ class VentanaPrincipal:
                 fila.bind("<Button-1>", lambda e, it=entry: self._on_click_album(it))
                 self.albumes_encontrados.append(entry)
 
-        self.btn_buscar.config(state="normal", text="🔍 Buscar")
+        self.btn_buscar.config(state="normal", text="Buscar")
         if not error:
             self._log(f"Se encontraron {len(resultados)} álbum(es)/playlist(s).")
         self._actualizar_boton_descargar()
@@ -391,21 +603,24 @@ class VentanaPrincipal:
     def _actualizar_boton_descargar(self):
         hay_seleccion = any(item["var"].get() for item in self.albumes_encontrados)
         if hay_seleccion and not self._descargando:
-            self.btn_descargar.config(state="normal", bg="#27ae60")
+            self.btn_descargar.config(state="normal", bg=T["ok"])
         else:
-            self.btn_descargar.config(state="disabled", bg="#95a5a6")
+            self.btn_descargar.config(state="disabled", bg=T["off"])
 
     # ------------------------------------------------------------------
     # Tracklist del álbum clickeado + preview con doble click
     # ------------------------------------------------------------------
     def _on_click_album(self, item):
         if self._fila_resaltada is not None:
-            self._config_seguro(self._fila_resaltada, bg="white")
+            self._config_seguro(self._fila_resaltada, bg=T["card"], highlightbackground=T["borde"])
             for hijo in self._fila_resaltada.winfo_children():
                 if isinstance(hijo, tk.Label):
-                    self._config_seguro(hijo, bg="white")
-        item["_fila"].config(bg="#eaf2fa")
-        item["_label"].config(bg="#eaf2fa")
+                    self._config_seguro(hijo, bg=T["card"])
+        item["_fila"].config(bg=T["card_sel"], highlightbackground=T["acento2"])
+        item["_label"].config(bg=T["card_sel"])
+        for hijo in item["_fila"].winfo_children():
+            if isinstance(hijo, tk.Checkbutton):
+                hijo.config(bg=T["card_sel"], activebackground=T["card_sel"])
         self._fila_resaltada = item["_fila"]
 
         self._gen_tracklist += 1
@@ -527,9 +742,10 @@ class VentanaPrincipal:
         self._guardar_sesion(seleccionados, artista, mejor_version)
         self._sesion_terminada = False
         self._descargando = True
+        self._eq_iniciar()
         self._cancelar_descarga.clear()
-        self.btn_descargar.config(state="disabled", bg="#95a5a6", text="⏳ Descargando...")
-        self.btn_detener_descarga.config(state="normal", bg="#c0392b", text="⏹ Detener descarga")
+        self.btn_descargar.config(state="disabled", bg=T["off"], text="⏳  Descargando...")
+        self.btn_detener_descarga.config(state="normal", bg=T["stop"], text="⏹  Detener")
         self.btn_buscar.config(state="disabled")
         self.progressbar.config(value=0)
         threading.Thread(
@@ -786,6 +1002,7 @@ class VentanaPrincipal:
     def _cola_cargar(self, trabajo):
         """Llena la lista con todos los temas: cada fila empieza 'En cola'."""
         self._cola_estado = {}
+        self._stats_set(total=len(trabajo), ok=0, omit=0, err=0)
         try:
             self.lista_cola.delete(0, "end")
         except tk.TclError:
@@ -851,6 +1068,8 @@ class VentanaPrincipal:
             return
         def _ui():
             self._cola_estado.pop(fila, None)
+            clave = {"ok": "ok", "omitido": "omit"}.get(estado, "err")
+            self._stats_set(**{clave: self._stats[clave] + 1})
             iconos = {"ok": ("✅", COLOR_OK), "error": ("❌", COLOR_ERROR),
                       "omitido": ("⏭", COLOR_OMITIDO), "no_disponible": ("🚫", COLOR_ERROR)}
             icono, color = iconos.get(estado, ("•", COLOR_OMITIDO))
@@ -887,8 +1106,8 @@ class VentanaPrincipal:
         self._descargando = False
         self._cancelar_descarga.clear()
         self._config_seguro(self.btn_buscar, state="normal")
-        self._config_seguro(self.btn_descargar, text="⬇️ Descargar seleccionados")
-        self._config_seguro(self.btn_detener_descarga, state="disabled", bg="#95a5a6", text="⏹ Detener descarga")
+        self._config_seguro(self.btn_descargar, text="⬇  Descargar seleccionados")
+        self._config_seguro(self.btn_detener_descarga, state="disabled", bg=T["off"], text="⏹  Detener")
         self._actualizar_boton_descargar()
 
     # ------------------------------------------------------------------
