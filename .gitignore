@@ -13,3 +13,7 @@ config/*.tmp
 _backup_antes_de_cambios/
 _to_delete/
 config/sesion_pendiente.json
+instalador/_archivos/dist/
+instalador/_archivos/build/
+*.spec
+config/config_app.json

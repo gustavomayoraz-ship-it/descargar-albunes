@@ -22,3 +22,14 @@ Ese módulo se puede copiar a otros proyectos.
 ## Notas
 - Si ya hay un tema en la carpeta del álbum, se omite: volver a tocar *Descargar* completa lo que falta.
 - `ffmpeg/` y `deno/` se descargan desde la propia app y no se versionan.
+
+
+## Instalar (Windows)
+
+1. Bajá **DescargarAlbunes-Setup.exe** desde la sección [Releases](../../releases/latest).
+2. Abrilo: prepara todo solo (Python 3.14 portable, FFmpeg, Deno y las librerías) y crea los accesos directos.
+3. Usá el acceso directo **Descargar Álbumes**.
+
+Para correr desde el código: `Iniciar.bat` (usa Python 3.14 y lo instala si falta).
+
+> Lee [AVISO_LEGAL.md](AVISO_LEGAL.md) antes de usarlo.

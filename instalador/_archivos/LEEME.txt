@@ -1,0 +1,31 @@
+Descargar Álbumes - Instalador (lanzador liviano)
+==================================================
+
+Qué hace
+--------
+Prepara Descargar Álbumes en UNA carpeta, sin que tengas que instalar Python:
+  1) Python 3.14 portable COMPLETO (con Tkinter y pip), bajado de python.org. No necesita administrador.
+  2) El código del programa (desde GitHub).
+  3) ffmpeg y ffprobe, y Deno (el intérprete de JavaScript que yt-dlp necesita para YouTube).
+  4) Las librerías: yt-dlp, requests, librosa, numpy, mutagen.
+Después crea accesos directos (Escritorio y menú Inicio) y abre el programa.
+Si ya está todo instalado, abre el programa directo, sin ventana.
+Firefox no lo instala este instalador: el programa mismo lo verifica y ofrece instalarlo.
+
+Armar el .exe
+-------------
+  Opción A (automática): en GitHub, pestaña Actions > "Construir instalador" > Run workflow.
+                         Deja DescargarAlbunes-Setup.exe en la sección Releases.
+  Opción B (en tu PC):   doble clic en  Construir_exe.bat  ->  queda  dist\DescargarAlbunes-Setup.exe
+  El .exe se sube a "Releases" (no dentro del repositorio).
+
+Opciones (se agregan al final del comando o del acceso directo)
+---------------------------------------------------------------
+  --portable        instala en una carpeta "DescargarAlbunes" junto al instalador (también si existe portable.txt)
+  --carpeta RUTA    instala en esa carpeta
+  --actualizar      vuelve a bajar el código desde GitHub (no toca la música ni la configuración)
+  --ventana         muestra la ventana aunque ya esté todo instalado
+
+Aviso
+-----
+Mirá AVISO_LEGAL.md en la raíz del repositorio: el uso indebido es responsabilidad de quien lo usa.

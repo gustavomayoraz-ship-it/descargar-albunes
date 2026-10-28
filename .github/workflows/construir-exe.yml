@@ -1,0 +1,30 @@
+name: Construir instalador
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Armar el .exe (PyInstaller)
+        run: |
+          python -m pip install --upgrade pyinstaller
+          python -m PyInstaller --onefile --noconsole --clean --name DescargarAlbunes-Setup instalador/_archivos/DescargarAlbunesInstalador.py
+      - name: Publicar en Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then TAG="instalador-$(date +%Y%m%d-%H%M)"; fi
+          gh release create "$TAG" dist/DescargarAlbunes-Setup.exe --title "Descargar Álbumes $TAG" --notes "Instalador liviano: baja Python 3.14 portable, el programa, FFmpeg, Deno y las librerías. Mirá AVISO_LEGAL.md." --latest
