@@ -11,6 +11,9 @@ y el archivo final solo se publica si pasó la validación (tamaño y duración)
 import logging
 import os
 import shutil
+import subprocess
+import sys
+import tempfile
 import uuid
 
 import anti_bloqueo
@@ -19,6 +22,11 @@ from utils import (
 )
 
 log = logging.getLogger("albumes.descargador")
+
+# Volumen parejo para todos los temas (estándar de streaming, EBU R128).
+VOLUMEN_OBJETIVO_I = -14.0    # LUFS integrado
+VOLUMEN_OBJETIVO_TP = -1.5    # true peak máximo (evita saturar)
+VOLUMEN_OBJETIVO_LRA = 11.0
 
 
 class ErrorDescarga(Exception):
@@ -31,11 +39,13 @@ def _opciones_descarga(carpeta_temp, ffmpeg_path, registro):
         "quiet": True,
         "no_warnings": True,
         "format": "bestaudio/best",
+        # Máxima calidad: entre los formatos de audio se elige el de MAYOR bitrate.
+        "format_sort": ["abr", "asr", "acodec"],
         "outtmpl": os.path.join(carpeta_temp, "%(id)s.%(ext)s"),
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3",
-            "preferredquality": "192",
+            "preferredquality": "0",  # mp3 VBR V0 (~245 kbps, la máxima del códec)
         }],
         "noplaylist": True,
         "ignoreerrors": False,
@@ -69,6 +79,48 @@ def descargar_audio(url_video, carpeta_temp, ffmpeg_path=None):
     if not os.path.isfile(ruta_mp3):
         raise ErrorDescarga("FFmpeg no generó el mp3 (¿falta FFmpeg o falló la conversión?)")
     return ruta_mp3
+
+
+def _exe_ffmpeg(ffmpeg_path):
+    nombre = "ffmpeg.exe" if sys.platform.startswith("win") else "ffmpeg"
+    if ffmpeg_path:
+        candidato = os.path.join(ffmpeg_path, nombre)
+        if os.path.isfile(candidato):
+            return candidato
+    return shutil.which("ffmpeg")
+
+
+def normalizar_volumen(ruta_mp3, ffmpeg_path=None):
+    """
+    Pareja el volumen a -14 LUFS con el filtro loudnorm de ffmpeg (una sola
+    pasada), recodificando en mp3 VBR V0 para no perder calidad y conservando
+    los metadatos. Reemplaza el archivo solo si ffmpeg terminó bien; si falla,
+    el original queda intacto y se lanza ErrorDescarga.
+    """
+    exe = _exe_ffmpeg(ffmpeg_path)
+    if not exe:
+        raise ErrorDescarga("no se encontró FFmpeg para normalizar el volumen")
+    fd, temporal = tempfile.mkstemp(prefix="norm_", suffix=".mp3", dir=os.path.dirname(ruta_mp3))
+    os.close(fd)
+    try:
+        cmd = [
+            exe, "-y", "-hide_banner", "-loglevel", "error", "-i", ruta_mp3,
+            "-af", f"loudnorm=I={VOLUMEN_OBJETIVO_I}:TP={VOLUMEN_OBJETIVO_TP}:LRA={VOLUMEN_OBJETIVO_LRA}",
+            "-codec:a", "libmp3lame", "-q:a", "0", "-map_metadata", "0", "-id3v2_version", "3",
+            temporal,
+        ]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=600,
+                           stdin=subprocess.DEVNULL,
+                           creationflags=0x08000000 if sys.platform.startswith("win") else 0)
+        if r.returncode != 0 or not os.path.isfile(temporal) or os.path.getsize(temporal) < 100_000:
+            raise ErrorDescarga(f"ffmpeg falló al normalizar: {(r.stderr or '')[-200:]}")
+        os.replace(temporal, ruta_mp3)
+    finally:
+        if os.path.exists(temporal):
+            try:
+                os.remove(temporal)
+            except OSError:
+                pass
 
 
 def validar_mp3(ruta_mp3, duracion_esperada=None):
@@ -164,7 +216,7 @@ def escribir_tags(ruta_mp3, titulo, artista, album, numero_tema, bpm):
 
 
 def procesar_tema(url_video, artista, nombre_tema, numero_tema, nombre_album,
-                  ffmpeg_path=None, duracion_esperada=None, on_etapa=None, arreglos=None):
+                  ffmpeg_path=None, duracion_esperada=None, on_etapa=None, arreglos=None, normalizar=True):
     """
     Descarga, valida, calcula BPM, taggea y deja el archivo final en la
     carpeta del álbum como "[BPM BPM] Álbum (Artista). NN-Tema.mp3".
@@ -198,6 +250,15 @@ def procesar_tema(url_video, artista, nombre_tema, numero_tema, nombre_album,
             raise ErrorDescarga(f"Archivo inválido: {motivo}")
         if dur is not None and duracion_esperada:
             arreglos.append(f"duración verificada ({dur:.0f}s)")
+
+        if normalizar:
+            etapa("Normalizando volumen")
+            try:
+                normalizar_volumen(ruta_descargada, ffmpeg_path)
+                arreglos.append("volumen normalizado a -14 LUFS")
+            except Exception as exc:
+                log.warning("No se pudo normalizar %s: %s", ruta_descargada, exc)
+                arreglos.append("no se pudo normalizar el volumen (queda el original)")
 
         etapa("Analizando BPM")
         bpm = calcular_bpm(ruta_descargada, dur, notas=arreglos)

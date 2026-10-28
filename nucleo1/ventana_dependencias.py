@@ -66,7 +66,7 @@ URL_FIREFOX = "https://download.mozilla.org/?product=firefox-latest-ssl&os=win64
 # ----------------------------------------------------------------------
 # Configuración (sin proxy)
 # ----------------------------------------------------------------------
-CONFIG_POR_DEFECTO = {"historial_busquedas": [], "buscar_mejor_version": False}
+CONFIG_POR_DEFECTO = {"historial_busquedas": [], "buscar_mejor_version": False, "normalizar_volumen": True}
 
 
 def cargar_config_app():

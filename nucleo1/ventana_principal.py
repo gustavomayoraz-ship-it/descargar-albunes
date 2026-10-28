@@ -44,6 +44,7 @@ ETAPAS = {
     "Buscando versión": ("🔎", "#0369a1"),
     "Descargando": ("⬇️", "#0e7490"),
     "Validando": ("🛡️", "#b45309"),
+    "Normalizando volumen": ("🔊", "#0e7490"),
     "Analizando BPM": ("🎵", "#6d28d9"),
     "Etiquetas": ("🏷️", "#a21caf"),
     "Renombrando": ("✏️", "#be185d"),
@@ -220,6 +221,12 @@ class VentanaPrincipal:
             fila_opciones, text="Buscar la mejor versión de cada tema (más lento)",
             variable=self.var_mejor_version, bg="#f8f9fa", font=("Segoe UI", 9),
         ).pack(side="left")
+
+        self.var_normalizar = tk.BooleanVar(value=bool(self.config_data.get("normalizar_volumen", True)))
+        tk.Checkbutton(
+            fila_opciones, text="Igualar el volumen de todos los temas (-14 LUFS)",
+            variable=self.var_normalizar, bg="#f8f9fa", font=("Segoe UI", 9),
+        ).pack(side="left", padx=(14, 0))
 
         fila_descarga = tk.Frame(contenedor, bg="#f8f9fa")
         fila_descarga.pack(fill="x")
@@ -457,6 +464,7 @@ class VentanaPrincipal:
             return
         mejor_version = bool(self.var_mejor_version.get())
         self.config_data["buscar_mejor_version"] = mejor_version
+        self.config_data["normalizar_volumen"] = bool(self.var_normalizar.get())
         self._guardar_config()
 
         self._descargando = True
@@ -686,6 +694,7 @@ class VentanaPrincipal:
                         url, artista, tarea["titulo_tema"], tarea["numero"], tarea["album"],
                         ffmpeg_path=self.ffmpeg_path_dir, duracion_esperada=tarea.get("duracion"),
                         on_etapa=lambda n: self._cola_etapa(tarea, n), arreglos=propios,
+                        normalizar=bool(self.config_data.get("normalizar_volumen", True)),
                     )
                     if intento > 1:
                         arreglos.append(f"reintentado ({intento} intentos)")
