@@ -112,9 +112,9 @@ class VentanaPrincipal:
         self.ventana.title("🎵 Descargar Álbumes")
         self.ventana.configure(bg=T["fondo"])
         ancho = min(1120, max(900, self.ventana.winfo_screenwidth() - 60))
-        alto = min(900, max(640, self.ventana.winfo_screenheight() - 110))
+        alto = min(820, max(560, self.ventana.winfo_screenheight() - 110))
         self.ventana.geometry(f"{ancho}x{alto}+{max(0, (self.ventana.winfo_screenwidth() - ancho) // 2)}+10")
-        self.ventana.minsize(860, 600)
+        self.ventana.minsize(820, 520)
 
         self._construir_ui()
         self.ventana.protocol("WM_DELETE_WINDOW", self._on_cerrar)
@@ -207,9 +207,9 @@ class VentanaPrincipal:
         self.ventana.option_add("*TCombobox*Listbox.font", (FUENTE, 10))
 
     def _chip(self, padre, titulo, variable, color):
-        f = tk.Frame(padre, bg=T["fondo"], padx=12, pady=5, highlightthickness=1,
+        f = tk.Frame(padre, bg=T["fondo"], padx=10, pady=2, highlightthickness=1,
                      highlightbackground=color)
-        tk.Label(f, textvariable=variable, font=(FUENTE, 15, "bold"), bg=T["fondo"], fg=color).pack()
+        tk.Label(f, textvariable=variable, font=(FUENTE, 13, "bold"), bg=T["fondo"], fg=color).pack()
         tk.Label(f, text=titulo, font=(FUENTE, 7, "bold"), bg=T["fondo"], fg=T["suave"]).pack()
         return f
 
@@ -240,14 +240,14 @@ class VentanaPrincipal:
         self._stats = {"total": 0, "ok": 0, "omit": 0, "err": 0}
 
         # ---- encabezado con degradado + ecualizador ----
-        self.cab = tk.Canvas(self.ventana, height=104, highlightthickness=0, bg=T["fondo"])
+        self.cab = tk.Canvas(self.ventana, height=84, highlightthickness=0, bg=T["fondo"])
         self.cab.pack(fill="x")
         self._barras = []
         self._eq_fase = 0.0
         self._eq_corriendo = False
-        self.cab.create_text(28, 38, anchor="w", text="Descargar Álbumes", fill="white",
-                             font=(FUENTE, 24, "bold"), tags="titulo")
-        self.cab.create_text(30, 70, anchor="w", fill="#dcd6ff", tags="subtitulo",
+        self.cab.create_text(26, 28, anchor="w", text="Descargar Álbumes", fill="white",
+                             font=(FUENTE, 20, "bold"), tags="titulo")
+        self.cab.create_text(28, 56, anchor="w", fill="#dcd6ff", tags="subtitulo",
                              text="Buscá un artista · escuchá los temas · bajá discos completos en máxima calidad",
                              font=(FUENTE, 10))
         marco_chips = tk.Frame(self.cab, bg=T["fondo"])
@@ -258,55 +258,109 @@ class VentanaPrincipal:
         self._ventana_chips = self.cab.create_window(0, 40, window=marco_chips, anchor="e", tags="chips")
         self.cab.bind("<Configure>", self._redibujar_cabecera)
 
-        contenedor = tk.Frame(self.ventana, bg=T["fondo"], padx=18, pady=12)
+        contenedor = tk.Frame(self.ventana, bg=T["fondo"], padx=16, pady=8)
         contenedor.pack(fill="both", expand=True)
 
         # ---- búsqueda ----
         fila_busqueda = tk.Frame(contenedor, bg=T["fondo"])
-        fila_busqueda.pack(fill="x", pady=(0, 10))
+        fila_busqueda.pack(side="top", fill="x", pady=(0, 8))
         marco_entrada = tk.Frame(fila_busqueda, bg=T["acento"], padx=2, pady=2)
         marco_entrada.pack(side="left", fill="x", expand=True)
-        tk.Label(marco_entrada, text=" 🔍", bg=T["card2"], fg=T["acento2"], font=(FUENTE, 13)).pack(
+        tk.Label(marco_entrada, text=" 🔍", bg=T["card2"], fg=T["acento2"], font=(FUENTE, 12)).pack(
             side="left", fill="y")
         self.var_busqueda = tk.StringVar()
         self.combo_busqueda = ttk.Combobox(
-            marco_entrada, textvariable=self.var_busqueda, font=(FUENTE, 13), style="Dark.TCombobox",
+            marco_entrada, textvariable=self.var_busqueda, font=(FUENTE, 12), style="Dark.TCombobox",
             values=self.config_data.get("historial_busquedas", []),
         )
-        self.combo_busqueda.pack(side="left", fill="x", expand=True, ipady=6)
+        self.combo_busqueda.pack(side="left", fill="x", expand=True, ipady=4)
         self.combo_busqueda.bind("<Return>", lambda e: self._on_buscar())
         self.combo_busqueda.bind("<<ComboboxSelected>>", lambda e: self._on_buscar())
         self.btn_buscar = self._boton(fila_busqueda, "Buscar", self._on_buscar, T["acento"], T["acento_hover"])
-        self.btn_buscar.config(padx=26, pady=10, font=(FUENTE, 11, "bold"))
+        self.btn_buscar.config(padx=24, pady=7, font=(FUENTE, 11, "bold"))
         self.btn_buscar.pack(side="left", padx=(10, 0))
 
-        fila_seleccion = tk.Frame(contenedor, bg=T["fondo"])
-        fila_seleccion.pack(fill="x", pady=(0, 6))
+        # ---- zona de controles (abajo, siempre visible) ----
+        inferior = tk.Frame(contenedor, bg=T["fondo"])
+        inferior.pack(side="bottom", fill="x", pady=(8, 0))
+
+        self.marco_log = tk.Frame(inferior, bg=T["fondo"])   # oculto hasta tocar "Registro"
+        self.texto_log = tk.Text(self.marco_log, height=6, font=("Consolas", 9), bg="#080a1a", fg="#9fb0e8",
+                                 relief="flat", bd=0, padx=8, pady=6, insertbackground="white")
+        self.texto_log.pack(fill="x", pady=(0, 8))
+        self.texto_log.configure(state="disabled")
+
+        fila_opciones = tk.Frame(inferior, bg=T["fondo"])
+        fila_opciones.pack(fill="x", pady=(0, 8))
+        tk.Label(fila_opciones, text="Artista (carpeta y tags)", bg=T["fondo"],
+                 font=(FUENTE, 9, "bold"), fg=T["suave"]).pack(side="left")
+        marco_art = tk.Frame(fila_opciones, bg=T["borde"], padx=1, pady=1)
+        marco_art.pack(side="left", padx=(8, 18))
+        self.var_artista_carpeta = tk.StringVar()
+        tk.Entry(marco_art, textvariable=self.var_artista_carpeta, width=24, bg=T["card2"],
+                 fg=T["texto"], insertbackground=T["texto"], relief="flat",
+                 font=(FUENTE, 10)).pack(ipady=3, padx=2)
+        self.var_mejor_version = tk.BooleanVar(value=bool(self.config_data.get("buscar_mejor_version", False)))
+        self.var_normalizar = tk.BooleanVar(value=bool(self.config_data.get("normalizar_volumen", True)))
+        for texto, var in (("🔎  Mejor versión de cada tema (más lento)", self.var_mejor_version),
+                           ("🔊  Igualar volumen (-14 LUFS)", self.var_normalizar)):
+            tk.Checkbutton(
+                fila_opciones, text=texto, variable=var, bg=T["fondo"], fg=T["texto"],
+                selectcolor=T["card2"], activebackground=T["fondo"], activeforeground=T["texto"],
+                font=(FUENTE, 9), bd=0, highlightthickness=0,
+            ).pack(side="left", padx=(0, 14))
+
+        fila_accion = tk.Frame(inferior, bg=T["fondo"])
+        fila_accion.pack(fill="x")
+        self.btn_descargar = self._boton(fila_accion, "⬇  Descargar seleccionados", self._on_descargar,
+                                         T["off"], T["ok_hover"], state="disabled")
+        self.btn_descargar.config(padx=20, pady=8, font=(FUENTE, 11, "bold"))
+        self.btn_descargar.pack(side="left")
+        self.btn_detener_descarga = self._boton(fila_accion, "⏹  Detener", self._on_detener_descarga,
+                                                T["off"], T["stop_hover"], state="disabled")
+        self.btn_detener_descarga.config(pady=8)
+        self.btn_detener_descarga.pack(side="left", padx=(8, 12))
+
+        derecha = tk.Frame(fila_accion, bg=T["fondo"])
+        derecha.pack(side="right")
+        self.btn_log = self._boton(derecha, "📜  Registro", self._toggle_log, T["card2"], T["card_sel"])
+        self.btn_log.config(pady=8)
+        self.btn_log.pack(side="left", padx=(0, 8))
+        self.btn_abrir_carpeta = self._boton(derecha, "📂  Carpeta", self._on_abrir_carpeta_descargas,
+                                             T["card2"], T["card_sel"])
+        self.btn_abrir_carpeta.config(pady=8)
+        self.btn_abrir_carpeta.pack(side="left")
+
+        centro = tk.Frame(fila_accion, bg=T["fondo"])
+        centro.pack(side="left", fill="x", expand=True)
+        self.lbl_estado = tk.Label(centro, text="Listo para descargar.", font=(FUENTE, 9),
+                                   bg=T["fondo"], fg=T["suave"], anchor="w")
+        self.lbl_estado.pack(fill="x")
+        self.progressbar = ttk.Progressbar(centro, mode="determinate", length=200,
+                                           style="Neon.Horizontal.TProgressbar")
+        self.progressbar.pack(fill="x", pady=(2, 0))
+
+        # ---- zona central: álbumes | (temas del álbum / temas en proceso) ----
+        paned = tk.PanedWindow(contenedor, orient="horizontal", sashwidth=8, bg=T["fondo"],
+                               bd=0, sashrelief="flat")
+        paned.pack(side="top", fill="both", expand=True)
+
+        marco_lista, cuerpo_albumes, _ = self._tarjeta(paned, "Álbumes encontrados", "💿")
+        fila_sel = tk.Frame(cuerpo_albumes, bg=T["card"])
+        fila_sel.pack(side="top", fill="x", padx=8, pady=(6, 0))
         self.var_seleccionar_todos = tk.BooleanVar(value=False)
         tk.Checkbutton(
-            fila_seleccion, text="Seleccionar todos", variable=self.var_seleccionar_todos,
-            bg=T["fondo"], fg=T["texto"], selectcolor=T["card2"], activebackground=T["fondo"],
+            fila_sel, text="Seleccionar todos", variable=self.var_seleccionar_todos,
+            bg=T["card"], fg=T["texto"], selectcolor=T["card2"], activebackground=T["card"],
             activeforeground=T["texto"], font=(FUENTE, 9, "bold"), bd=0, highlightthickness=0,
             command=self._toggle_seleccionar_todos,
         ).pack(side="left")
-        tk.Label(
-            fila_seleccion, text="   Click en un álbum para ver sus temas  ·  Doble click en un tema para escucharlo en YouTube",
-            bg=T["fondo"], fg=T["tenue"], font=(FUENTE, 8),
-        ).pack(side="left")
-
-        # La parte de abajo se empaqueta PRIMERO (side="bottom") para que, si la pantalla es
-        # chica, se achique el panel de álbumes y nunca queden ocultos los botones ni la lista.
-        inferior = tk.Frame(contenedor, bg=T["fondo"])
-        inferior.pack(side="bottom", fill="x")
-
-        # ---- panel dividido: álbumes | temas ----
-        paned = tk.PanedWindow(contenedor, orient="horizontal", sashwidth=10, bg=T["fondo"],
-                               bd=0, sashrelief="flat")
-        paned.pack(side="top", fill="both", expand=True, pady=(0, 10))
-
-        marco_lista, cuerpo_albumes, _ = self._tarjeta(paned, "Álbumes encontrados", "💿")
-        self.canvas = tk.Canvas(cuerpo_albumes, bg=T["card"], highlightthickness=0, yscrollincrement=24)
-        scrollbar = ttk.Scrollbar(cuerpo_albumes, orient="vertical", command=self.canvas.yview,
+        tk.Label(fila_sel, text="  Click: ver temas", bg=T["card"], fg=T["tenue"],
+                 font=(FUENTE, 8)).pack(side="left")
+        cuerpo_lista = tk.Frame(cuerpo_albumes, bg=T["card"])
+        cuerpo_lista.pack(side="top", fill="both", expand=True)
+        self.canvas = tk.Canvas(cuerpo_lista, bg=T["card"], highlightthickness=0, yscrollincrement=24)
+        scrollbar = ttk.Scrollbar(cuerpo_lista, orient="vertical", command=self.canvas.yview,
                                   style="Dark.Vertical.TScrollbar")
         self.frame_resultados = tk.Frame(self.canvas, bg=T["card"])
         self.frame_resultados.bind(
@@ -327,10 +381,18 @@ class VentanaPrincipal:
         )
         self.lbl_sin_resultados.pack(fill="x")
 
-        marco_tracklist, cuerpo_temas, self.lbl_panel_derecho = self._tarjeta(paned, "Temas del álbum", "🎼")
+        derecha_pw = tk.PanedWindow(paned, orient="vertical", sashwidth=8, bg=T["fondo"],
+                                    bd=0, sashrelief="flat")
+
+        marco_tracklist, cuerpo_temas, self.lbl_panel_derecho = self._tarjeta(derecha_pw, "Temas del álbum", "🎼")
+        self.lbl_reproduciendo = tk.Label(
+            cuerpo_temas, text="▶  Doble click en un tema para abrirlo en YouTube",
+            bg=T["card"], fg=T["suave"], font=(FUENTE, 8), anchor="w", wraplength=380, justify="left",
+        )
+        self.lbl_reproduciendo.pack(side="bottom", fill="x", padx=10, pady=(2, 4))
         self.tree_tracklist = ttk.Treeview(
             cuerpo_temas, columns=("numero", "titulo"), show="headings", selectmode="browse",
-            style="Dark.Treeview",
+            style="Dark.Treeview", height=4,
         )
         self.tree_tracklist.heading("numero", text="#")
         self.tree_tracklist.heading("titulo", text="Tema")
@@ -339,70 +401,13 @@ class VentanaPrincipal:
         sc_temas = ttk.Scrollbar(cuerpo_temas, orient="vertical", command=self.tree_tracklist.yview,
                                  style="Dark.Vertical.TScrollbar")
         self.tree_tracklist.configure(yscrollcommand=sc_temas.set)
-        self.lbl_reproduciendo = tk.Label(
-            cuerpo_temas, text="▶  Doble click en un tema para abrirlo en YouTube",
-            bg=T["card"], fg=T["suave"], font=(FUENTE, 8), anchor="w", wraplength=340, justify="left",
-        )
-        self.lbl_reproduciendo.pack(side="bottom", fill="x", padx=10, pady=(4, 8))
         sc_temas.pack(side="right", fill="y")
         self.tree_tracklist.pack(side="left", fill="both", expand=True)
         self.tree_tracklist.bind("<Double-1>", self._on_doble_click_tema)
 
-        paned.add(marco_lista, minsize=300, width=480)
-        paned.add(marco_tracklist, minsize=300, width=420)
-
-        # ---- opciones ----
-        fila_opciones = tk.Frame(inferior, bg=T["fondo"])
-        fila_opciones.pack(fill="x", pady=(0, 8))
-        tk.Label(fila_opciones, text="Artista (carpeta y tags)", bg=T["fondo"],
-                 font=(FUENTE, 9, "bold"), fg=T["suave"]).pack(side="left")
-        marco_art = tk.Frame(fila_opciones, bg=T["borde"], padx=1, pady=1)
-        marco_art.pack(side="left", padx=(8, 18))
-        self.var_artista_carpeta = tk.StringVar()
-        tk.Entry(marco_art, textvariable=self.var_artista_carpeta, width=26, bg=T["card2"],
-                 fg=T["texto"], insertbackground=T["texto"], relief="flat",
-                 font=(FUENTE, 10)).pack(ipady=4, padx=2)
-        self.var_mejor_version = tk.BooleanVar(value=bool(self.config_data.get("buscar_mejor_version", False)))
-        self.var_normalizar = tk.BooleanVar(value=bool(self.config_data.get("normalizar_volumen", True)))
-        for texto, var in (("🔎  Mejor versión de cada tema (más lento)", self.var_mejor_version),
-                           ("🔊  Igualar volumen (-14 LUFS)", self.var_normalizar)):
-            tk.Checkbutton(
-                fila_opciones, text=texto, variable=var, bg=T["fondo"], fg=T["texto"],
-                selectcolor=T["card2"], activebackground=T["fondo"], activeforeground=T["texto"],
-                font=(FUENTE, 9), bd=0, highlightthickness=0,
-            ).pack(side="left", padx=(0, 14))
-
-        # ---- botones de acción ----
-        fila_descarga = tk.Frame(inferior, bg=T["fondo"])
-        fila_descarga.pack(fill="x")
-        self.btn_descargar = self._boton(fila_descarga, "⬇  Descargar seleccionados", self._on_descargar,
-                                         T["off"], T["ok_hover"], state="disabled")
-        self.btn_descargar.config(padx=24, pady=10, font=(FUENTE, 11, "bold"))
-        self.btn_descargar.pack(side="left")
-        self.btn_detener_descarga = self._boton(fila_descarga, "⏹  Detener", self._on_detener_descarga,
-                                                T["off"], T["stop_hover"], state="disabled")
-        self.btn_detener_descarga.config(pady=10)
-        self.btn_detener_descarga.pack(side="left", padx=(10, 0))
-        self.btn_abrir_carpeta = self._boton(fila_descarga, "📂  Abrir carpeta", self._on_abrir_carpeta_descargas,
-                                             T["card2"], T["card_sel"])
-        self.btn_abrir_carpeta.config(pady=10)
-        self.btn_abrir_carpeta.pack(side="right")
-
-        self.progressbar = ttk.Progressbar(inferior, mode="determinate", length=380,
-                                           style="Neon.Horizontal.TProgressbar")
-        self.progressbar.pack(fill="x", pady=(12, 4))
-
-        self.lbl_estado = tk.Label(
-            inferior, text="Listo para descargar.", font=(FUENTE, 9), bg=T["fondo"],
-            fg=T["suave"], anchor="w",
-        )
-        self.lbl_estado.pack(fill="x")
-
-        # ---- lista de temas en proceso ----
-        marco_cola_ext, cuerpo_cola, _ = self._tarjeta(inferior, "Temas en proceso · descarga, análisis y arreglos", "📋")
-        marco_cola_ext.pack(fill="x", pady=(8, 0))
+        marco_cola_ext, cuerpo_cola, _ = self._tarjeta(derecha_pw, "Temas en proceso · descarga, análisis y arreglos", "📋")
         self.lista_cola = tk.Listbox(
-            cuerpo_cola, height=6, font=(FUENTE, 10), activestyle="none",
+            cuerpo_cola, height=4, font=(FUENTE, 10), activestyle="none",
             bg=T["card"], fg=T["texto"], selectbackground=T["card_sel"], selectforeground="white",
             relief="flat", bd=0, highlightthickness=0,
         )
@@ -412,12 +417,17 @@ class VentanaPrincipal:
         scroll_cola.pack(side="right", fill="y")
         self.lista_cola.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=4)
 
-        marco_log = tk.Frame(inferior, bg=T["fondo"])
-        marco_log.pack(fill="x", pady=(8, 0))
-        self.texto_log = tk.Text(marco_log, height=3, font=("Consolas", 9), bg="#080a1a", fg="#9fb0e8",
-                                 relief="flat", bd=0, padx=8, pady=6, insertbackground="white")
-        self.texto_log.pack(fill="x")
-        self.texto_log.configure(state="disabled")
+        derecha_pw.add(marco_tracklist, minsize=110, height=190, stretch="always")
+        derecha_pw.add(marco_cola_ext, minsize=130, stretch="always")
+
+        paned.add(marco_lista, minsize=280, width=400, stretch="always")
+        paned.add(derecha_pw, minsize=420, stretch="always")
+
+    def _toggle_log(self):
+        if self.marco_log.winfo_ismapped():
+            self.marco_log.pack_forget()
+        else:
+            self.marco_log.pack(side="top", fill="x", before=self.marco_log.master.winfo_children()[1])
 
     # ---- encabezado: degradado y ecualizador animado ----------------------
     def _redibujar_cabecera(self, _e=None):
@@ -442,7 +452,7 @@ class VentanaPrincipal:
         self.cab.tag_raise("titulo")
         self.cab.tag_raise("subtitulo")
         self.cab.tag_raise("chips")
-        self.cab.coords(self._ventana_chips, w - 22, 52)
+        self.cab.coords(self._ventana_chips, w - 20, 40)
         self._eq_pintar()
 
     def _eq_pintar(self):
@@ -453,7 +463,7 @@ class VentanaPrincipal:
         for i, item in enumerate(self._barras):
             if self._eq_corriendo:
                 v = 0.5 + 0.5 * math.sin(self._eq_fase + i * 0.55) * math.sin(self._eq_fase * 0.7 + i * 0.21)
-                alto = 4 + abs(v) * 34
+                alto = 4 + abs(v) * 26
             else:
                 alto = 4 + 10 * abs(math.sin(i * 0.35)) * (0.4 + 0.6 * math.sin(i * 0.08 + 1) ** 2)
             x1, _, x2, _ = self.cab.coords(item)
