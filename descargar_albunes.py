@@ -12,11 +12,21 @@ sin instalar en una PC nueva.
 
 Cualquier error inesperado queda registrado en config/app.log (con pythonw
 no hay consola donde verlo) y se muestra en un cuadro de diálogo.
+
+REGLA GENERAL: siempre corre con Python 3.14. Si se lo abre con otra versión,
+asegurar_python lo relanza con la 3.14 y, si no está instalada, la instala.
 """
 
-import logging
+# Tiene que ser lo PRIMERO: antes de importar cualquier otra cosa del proyecto.
 import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import asegurar_python
+
+asegurar_python.asegurar((3, 14))
+
+import logging
 import threading
 import traceback
 from logging.handlers import RotatingFileHandler
